@@ -30,6 +30,7 @@ import { useGitHubStatus } from "@/hooks/use-github-status";
  * TODO: Migrate to useWorktreeStatuses for the worktree-based workflow.
  */
 import { useBranchStatuses } from "@/hooks/use-branch-statuses";
+import { useWorktreeStatuses } from "@/hooks/use-worktree-statuses";
 import { useKeyboardNavigation } from "@/hooks/use-keyboard-navigation";
 import type { Bead, BeadStatus } from "@/types";
 
@@ -126,6 +127,12 @@ export default function KanbanBoard() {
   // Fetch branch statuses for all beads (legacy - for backward compatibility)
   const beadIds = useMemo(() => beads.map((b) => b.id), [beads]);
   const { statuses: branchStatuses } = useBranchStatuses(
+    project?.path ?? "",
+    beadIds
+  );
+
+  // Worktree statuses for PR workflow
+  const { statuses: worktreeStatuses } = useWorktreeStatuses(
     project?.path ?? "",
     beadIds
   );
@@ -356,6 +363,7 @@ export default function KanbanBoard() {
           bead={detailBead}
           ticketNumber={ticketNumbers.get(detailBead.id)}
           branchStatus={branchStatuses[detailBead.id]}
+          worktreeStatus={worktreeStatuses[detailBead.id]}
           open={isDetailOpen}
           onOpenChange={(open) => {
             setIsDetailOpen(open);
