@@ -9,6 +9,7 @@ pub mod fs;
 pub mod git;
 pub mod projects;
 pub mod watch;
+pub mod worktree;
 
 pub use projects::project_routes;
 pub use watch::watch_beads;

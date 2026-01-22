@@ -10,7 +10,7 @@ use axum::{
     body::Body,
     http::{header, Request, Response, StatusCode},
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use rust_embed::Embed;
@@ -118,6 +118,15 @@ async fn main() {
         .route("/api/fs/open-external", post(routes::fs::open_external))
         .route("/api/bd/command", post(routes::cli::bd_command))
         .route("/api/git/branch-status", get(routes::git::branch_status))
+        // Worktree endpoints
+        .route("/api/git/worktree-status", get(routes::worktree::worktree_status))
+        .route("/api/git/worktree", post(routes::worktree::create_worktree))
+        .route("/api/git/worktree", delete(routes::worktree::delete_worktree))
+        .route("/api/git/worktrees", get(routes::worktree::list_worktrees))
+        // PR endpoints
+        .route("/api/git/pr-status", get(routes::worktree::pr_status))
+        .route("/api/git/create-pr", post(routes::worktree::create_pr))
+        .route("/api/git/merge-pr", post(routes::worktree::merge_pr))
         .route("/api/watch/beads", get(routes::watch_beads))
         .fallback(serve_static)
         .layer(cors);
