@@ -351,10 +351,8 @@ pub async fn delete_worktree(Json(request): Json<DeleteWorktreeRequest>) -> impl
         .output()
         .await;
 
-    match output {
-        Ok(output) if output.status.success() => {
-            Json(DeleteWorktreeResponse { success: true }).into_response()
-        }
+    let worktree_removed = match output {
+        Ok(output) if output.status.success() => true,
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
             // Try force remove if there are untracked changes
@@ -371,35 +369,55 @@ pub async fn delete_worktree(Json(request): Json<DeleteWorktreeRequest>) -> impl
                     .await;
 
                 match force_output {
-                    Ok(output) if output.status.success() => {
-                        Json(DeleteWorktreeResponse { success: true }).into_response()
+                    Ok(output) if output.status.success() => true,
+                    _ => {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::json!({
+                                "error": format!("Failed to remove worktree: {}", stderr)
+                            })),
+                        )
+                            .into_response();
                     }
-                    _ => (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({
-                            "error": format!("Failed to remove worktree: {}", stderr)
-                        })),
-                    )
-                        .into_response(),
                 }
             } else {
-                (
+                return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({
                         "error": format!("Failed to remove worktree: {}", stderr)
                     })),
                 )
-                    .into_response()
+                    .into_response();
             }
         }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": format!("Failed to run git command: {}", e)
-            })),
-        )
-            .into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": format!("Failed to run git command: {}", e)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    if worktree_removed {
+        // Delete local branch (ignore errors - branch may not exist or be already deleted)
+        let _ = Command::new("git")
+            .args(["branch", "-D", &branch_name])
+            .current_dir(&request.repo_path)
+            .output()
+            .await;
+
+        // Close the bead (ignore errors - bead may not exist or already be closed)
+        let _ = Command::new("bd")
+            .args(["close", &request.bead_id])
+            .current_dir(&request.repo_path)
+            .output()
+            .await;
     }
+
+    Json(DeleteWorktreeResponse { success: true }).into_response()
 }
 
 // ============================================================================
@@ -885,8 +903,10 @@ pub async fn merge_pr(Json(request): Json<MergePrRequest>) -> impl IntoResponse 
     };
 
     // Merge PR using gh cli
+    // Note: Don't use --delete-branch as it fails when branch is used by a worktree.
+    // The cleanup step (delete_worktree) handles branch deletion.
     let output = Command::new("gh")
-        .args(["pr", "merge", &branch_name, merge_flag, "--delete-branch"])
+        .args(["pr", "merge", &branch_name, merge_flag])
         .current_dir(&request.repo_path)
         .output()
         .await;

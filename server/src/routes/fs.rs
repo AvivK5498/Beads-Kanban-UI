@@ -292,12 +292,44 @@ pub async fn open_external(Json(request): Json<OpenExternalRequest>) -> impl Int
     // Execute the appropriate command based on target
     let result = match request.target.as_str() {
         "vscode" => {
-            // Use "code" command for VS Code
-            std::process::Command::new("code").arg(&path).spawn()
+            // Try "code" command first, fall back to macOS open command
+            let code_result = std::process::Command::new("code").arg(&path).spawn();
+            if code_result.is_err() {
+                // Fallback for macOS: use open -a "Visual Studio Code"
+                #[cfg(target_os = "macos")]
+                {
+                    std::process::Command::new("open")
+                        .args(["-a", "Visual Studio Code"])
+                        .arg(&path)
+                        .spawn()
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    code_result
+                }
+            } else {
+                code_result
+            }
         }
         "cursor" => {
-            // Use "cursor" command for Cursor
-            std::process::Command::new("cursor").arg(&path).spawn()
+            // Try "cursor" command first, fall back to macOS open command
+            let cursor_result = std::process::Command::new("cursor").arg(&path).spawn();
+            if cursor_result.is_err() {
+                // Fallback for macOS: use open -a "Cursor"
+                #[cfg(target_os = "macos")]
+                {
+                    std::process::Command::new("open")
+                        .args(["-a", "Cursor"])
+                        .arg(&path)
+                        .spawn()
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    cursor_result
+                }
+            } else {
+                cursor_result
+            }
         }
         "finder" => {
             // Use the `open` crate for cross-platform support
