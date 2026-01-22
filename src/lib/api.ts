@@ -3,7 +3,7 @@
  * Replaces Tauri invoke() calls with HTTP fetch to backend
  */
 
-import type { Project, Tag, Bead } from '@/types';
+import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, PRStatus } from '@/types';
 
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3008';
 
@@ -144,12 +144,99 @@ export const bd = {
 };
 
 /**
+ * Worktree creation response
+ */
+export interface CreateWorktreeResponse {
+  success: boolean;
+  worktree_path: string;
+  branch: string;
+  already_existed: boolean;
+}
+
+/**
+ * Worktree deletion response
+ */
+export interface DeleteWorktreeResponse {
+  success: boolean;
+}
+
+/**
+ * List worktrees response
+ */
+export interface ListWorktreesResponse {
+  worktrees: WorktreeEntry[];
+}
+
+/**
+ * Create PR response
+ */
+export interface CreatePRResponse {
+  success: boolean;
+  pr_number?: number;
+  pr_url?: string;
+  error?: string;
+}
+
+/**
+ * Merge PR response
+ */
+export interface MergePRResponse {
+  success: boolean;
+  merged: boolean;
+  error?: string;
+}
+
+/**
+ * Merge method for PR merging
+ */
+export type MergeMethod = 'merge' | 'squash' | 'rebase';
+
+/**
  * Git API
  */
 export const git = {
+  // Existing branch status endpoint
   branchStatus: (path: string, branch: string) => fetchApi<BranchStatus>(
     `/api/git/branch-status?path=${encodeURIComponent(path)}&branch=${encodeURIComponent(branch)}`
   ),
+
+  // Worktree endpoints
+  worktreeStatus: (repoPath: string, beadId: string) => fetchApi<WorktreeStatus>(
+    `/api/git/worktree-status?repo_path=${encodeURIComponent(repoPath)}&bead_id=${encodeURIComponent(beadId)}`
+  ),
+
+  createWorktree: (repoPath: string, beadId: string, baseBranch = 'main') =>
+    fetchApi<CreateWorktreeResponse>('/api/git/worktree', {
+      method: 'POST',
+      body: JSON.stringify({ repo_path: repoPath, bead_id: beadId, base_branch: baseBranch }),
+    }),
+
+  deleteWorktree: (repoPath: string, beadId: string) =>
+    fetchApi<DeleteWorktreeResponse>('/api/git/worktree', {
+      method: 'DELETE',
+      body: JSON.stringify({ repo_path: repoPath, bead_id: beadId }),
+    }),
+
+  listWorktrees: (repoPath: string) => fetchApi<ListWorktreesResponse>(
+    `/api/git/worktrees?repo_path=${encodeURIComponent(repoPath)}`
+  ),
+
+  // PR endpoints
+  prStatus: (repoPath: string, beadId: string) => fetchApi<PRStatus>(
+    `/api/git/pr-status?repo_path=${encodeURIComponent(repoPath)}&bead_id=${encodeURIComponent(beadId)}`
+  ),
+
+  createPR: (repoPath: string, beadId: string, title: string, body: string) =>
+    fetchApi<CreatePRResponse>('/api/git/create-pr', {
+      method: 'POST',
+      body: JSON.stringify({ repo_path: repoPath, bead_id: beadId, title, body }),
+    }),
+
+  mergePR: (repoPath: string, beadId: string, mergeMethod: MergeMethod = 'squash') =>
+    fetchApi<MergePRResponse>('/api/git/merge-pr', {
+      method: 'POST',
+      body: JSON.stringify({ repo_path: repoPath, bead_id: beadId, merge_method: mergeMethod }),
+    }),
 };
 
 /**
