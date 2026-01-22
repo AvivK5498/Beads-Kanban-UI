@@ -3,6 +3,9 @@
  *
  * Efficiently fetches branch status (exists, ahead, behind) for all beads
  * in a project and keeps the data updated.
+ *
+ * @deprecated Use `useWorktreeStatuses` instead. This hook will be removed in a future version.
+ * The worktree-based workflow is now the primary approach for managing bead development environments.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -37,8 +40,13 @@ function beadIdToBranchName(beadId: string): string {
   return `bd-${beadId}`;
 }
 
+// Track if deprecation warning has been logged globally (once per app session)
+let hasLoggedDeprecationWarning = false;
+
 /**
  * Hook to fetch and track branch statuses for beads
+ *
+ * @deprecated Use `useWorktreeStatuses` instead. This hook will be removed in a future version.
  *
  * @param projectPath - Absolute path to the project git repository
  * @param beadIds - Array of bead IDs to check branch status for
@@ -67,6 +75,17 @@ export function useBranchStatuses(
   const [statuses, setStatuses] = useState<Record<string, BranchStatus>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+
+  // Log deprecation warning once per app session
+  useEffect(() => {
+    if (!hasLoggedDeprecationWarning) {
+      console.warn(
+        "[DEPRECATED] useBranchStatuses is deprecated. Use useWorktreeStatuses instead. " +
+        "The worktree-based workflow is now the primary approach for managing bead development environments."
+      );
+      hasLoggedDeprecationWarning = true;
+    }
+  }, []);
 
   // Track if initial load has completed
   const hasLoadedRef = useRef(false);

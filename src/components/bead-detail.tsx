@@ -10,26 +10,46 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { Bead, BeadStatus } from "@/types";
+import type { Bead, BeadStatus, WorktreeStatus, PRStatus, PRChecks } from "@/types";
 import type { BranchStatus } from "@/lib/git";
-import { ArrowLeft, GitBranch, Calendar } from "lucide-react";
+import {
+  ArrowLeft,
+  FolderOpen,
+  Calendar,
+  GitPullRequest,
+  ExternalLink,
+  Check,
+  X,
+  Clock,
+  GitMerge,
+  Trash2,
+  Loader2,
+  Upload,
+} from "lucide-react";
 import { DesignDocViewer } from "@/components/design-doc-viewer";
 import { SubtaskList } from "@/components/subtask-list";
+import { usePRStatus } from "@/hooks/use-pr-status";
+import * as api from "@/lib/api";
 import { useState, useEffect, useCallback, useMemo } from "react";
 
 export interface BeadDetailProps {
   bead: Bead;
   ticketNumber?: number;
+  /** @deprecated Use worktreeStatus instead */
   branchStatus?: BranchStatus;
+  /** Worktree status for the bead */
+  worktreeStatus?: WorktreeStatus;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children?: React.ReactNode;
-  /** Project root path (absolute) */
+  /** Project root path (absolute) - required for PR actions */
   projectPath?: string;
   /** All beads for resolving child task IDs */
   allBeads?: Bead[];
   /** Callback when clicking a child task */
   onChildClick?: (child: Bead) => void;
+  /** Callback after worktree cleanup (to refresh data) */
+  onCleanup?: () => void;
 }
 
 /**
@@ -113,46 +133,75 @@ function formatDate(dateString: string): string {
 }
 
 /**
- * Get branch badge color based on ahead/behind status
- * Dark theme variant with semi-transparent backgrounds
- * Red: diverged (needs rebase)
- * Green: ahead only (ready to merge)
- * Gray: behind only (merged/stale branch)
- * Green: up to date (synced)
+ * Format worktree path for display
  */
-function getBranchBadgeColor(status: BranchStatus): string {
-  const { ahead, behind } = status;
+function formatWorktreePath(path: string): string {
+  const match = path.match(/\.worktrees\/(.+)$/);
+  if (match) {
+    return `.worktrees/${match[1]}`;
+  }
+  const parts = path.split("/");
+  if (parts.length >= 2) {
+    return parts.slice(-2).join("/");
+  }
+  return path;
+}
 
-  if (ahead > 0 && behind > 0) {
-    // Needs rebase - red
-    return "bg-red-500/10 text-red-400 border-red-600/30";
-  } else if (ahead > 0 && behind === 0) {
-    // Ready to merge - green
-    return "bg-green-500/10 text-green-400 border-green-600/30";
-  } else if (ahead === 0 && behind > 0) {
-    // Merged/stale - gray
-    return "bg-zinc-500/10 text-zinc-400 border-zinc-600/30";
-  } else {
-    // Synced (ahead=0, behind=0) - green
-    return "bg-green-500/10 text-green-400 border-green-600/30";
+/**
+ * Get check status icon component
+ */
+function CheckStatusIcon({
+  status,
+  className,
+}: {
+  status: "success" | "failure" | "pending";
+  className?: string;
+}) {
+  switch (status) {
+    case "success":
+      return <Check className={cn("size-3.5 text-green-400", className)} aria-hidden="true" />;
+    case "failure":
+      return <X className={cn("size-3.5 text-red-400", className)} aria-hidden="true" />;
+    case "pending":
+      return <Clock className={cn("size-3.5 text-amber-400", className)} aria-hidden="true" />;
   }
 }
 
 /**
- * Get human-readable label for branch status
- * Returns short labels (up to 3 words) based on ahead/behind counts
+ * Get overall checks status display
  */
-function getBranchStatusLabel(status: BranchStatus): string {
-  const { ahead, behind } = status;
+function getChecksStatusDisplay(checks: PRChecks): {
+  icon: React.ReactNode;
+  text: string;
+  className: string;
+} {
+  const checksText = `${checks.passed}/${checks.total}`;
 
-  if (ahead > 0 && behind > 0) {
-    return "Needs rebase";
-  } else if (ahead > 0 && behind === 0) {
-    return "Ready to merge";
-  } else if (ahead === 0 && behind > 0) {
-    return "Merged";
+  if (checks.status === "success") {
+    return {
+      icon: <Check className="size-4" aria-hidden="true" />,
+      text: checksText,
+      className: "text-green-400",
+    };
   }
-  return "Synced";
+
+  if (checks.status === "pending") {
+    return {
+      icon: <Clock className="size-4" aria-hidden="true" />,
+      text: checksText,
+      className: "text-amber-400",
+    };
+  }
+
+  if (checks.status === "failure") {
+    return {
+      icon: <X className="size-4" aria-hidden="true" />,
+      text: checksText,
+      className: "text-red-400",
+    };
+  }
+
+  return { icon: null, text: checksText, className: "text-zinc-400" };
 }
 
 /**
@@ -167,16 +216,37 @@ export function BeadDetail({
   bead,
   ticketNumber,
   branchStatus,
+  worktreeStatus,
   open,
   onOpenChange,
   children,
   projectPath,
   allBeads,
   onChildClick,
+  onCleanup,
 }: BeadDetailProps) {
   const branchName = `bd-${formatBeadId(bead.id)}`;
   const [isDesignDocFullScreen, setIsDesignDocFullScreen] = useState(false);
   const hasDesignDoc = !!bead.design_doc;
+
+  // Action loading states
+  const [isCreatingPR, setIsCreatingPR] = useState(false);
+  const [isMergingPR, setIsMergingPR] = useState(false);
+  const [isCleaningUp, setIsCleaningUp] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Fetch PR status when detail panel is open and we have a worktree
+  const hasWorktree = worktreeStatus?.exists ?? false;
+  const shouldFetchPRStatus = open && hasWorktree && !!projectPath;
+
+  const {
+    status: prStatus,
+    isLoading: isPRStatusLoading,
+    refresh: refreshPRStatus,
+  } = usePRStatus(
+    projectPath ?? "",
+    shouldFetchPRStatus ? bead.id : null
+  );
 
   // Check if this is an epic with children
   const isEpic = bead.children && bead.children.length > 0;
@@ -203,6 +273,105 @@ export function BeadDetail({
       document.body.style.overflow = 'hidden'; // MorphingDialog will manage this
     }
   }, [isDesignDocFullScreen]);
+
+  // Clear action error when panel closes
+  useEffect(() => {
+    if (!open) {
+      setActionError(null);
+    }
+  }, [open]);
+
+  /**
+   * Handle creating a PR
+   */
+  const handleCreatePR = useCallback(async () => {
+    if (!projectPath) return;
+
+    setIsCreatingPR(true);
+    setActionError(null);
+
+    try {
+      const prBody = `Closes ${bead.id}\n\n${bead.description ?? ""}`;
+      const result = await api.git.createPR(projectPath, bead.id, bead.title, prBody);
+
+      if (!result.success && result.error) {
+        setActionError(result.error);
+      } else {
+        // Refresh PR status to show the new PR
+        await refreshPRStatus();
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : "Failed to create PR";
+      setActionError(error);
+    } finally {
+      setIsCreatingPR(false);
+    }
+  }, [projectPath, bead.id, bead.title, bead.description, refreshPRStatus]);
+
+  /**
+   * Handle merging a PR
+   */
+  const handleMergePR = useCallback(async () => {
+    if (!projectPath) return;
+
+    setIsMergingPR(true);
+    setActionError(null);
+
+    try {
+      const result = await api.git.mergePR(projectPath, bead.id, "squash");
+
+      if (!result.success && result.error) {
+        setActionError(result.error);
+      } else {
+        // Refresh PR status to show merged state
+        await refreshPRStatus();
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : "Failed to merge PR";
+      setActionError(error);
+    } finally {
+      setIsMergingPR(false);
+    }
+  }, [projectPath, bead.id, refreshPRStatus]);
+
+  /**
+   * Handle cleanup (delete worktree)
+   */
+  const handleCleanUp = useCallback(async () => {
+    if (!projectPath) return;
+
+    setIsCleaningUp(true);
+    setActionError(null);
+
+    try {
+      const result = await api.git.deleteWorktree(projectPath, bead.id);
+
+      if (!result.success) {
+        setActionError("Failed to delete worktree");
+      } else {
+        // Notify parent to refresh data
+        onCleanup?.();
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : "Failed to clean up";
+      setActionError(error);
+    } finally {
+      setIsCleaningUp(false);
+    }
+  }, [projectPath, bead.id, onCleanup]);
+
+  /**
+   * Open worktree in VS Code
+   */
+  const handleOpenInIDE = useCallback(async () => {
+    if (!worktreeStatus?.worktree_path) return;
+
+    try {
+      await api.fs.openExternal(worktreeStatus.worktree_path, "vscode");
+    } catch (err) {
+      console.error("Failed to open in IDE:", err);
+    }
+  }, [worktreeStatus?.worktree_path]);
 
   return (
     <>
@@ -282,21 +451,30 @@ export function BeadDetail({
                 </div>
               </div>
 
-              {/* Branch */}
+              {/* Worktree */}
               <div className="space-y-1">
-                <span className="text-zinc-500 text-xs">Branch</span>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5">
-                    <GitBranch className="h-3.5 w-3.5 text-zinc-500" aria-hidden="true" />
-                    <span className="font-mono text-xs text-zinc-200">{branchName}</span>
-                  </div>
-                  {branchStatus?.exists && (
-                    <Badge
-                      variant="outline"
-                      className={cn("text-[10px] px-1.5 py-0 font-medium", getBranchBadgeColor(branchStatus))}
-                    >
-                      {getBranchStatusLabel(branchStatus)}
-                    </Badge>
+                <span className="text-zinc-500 text-xs">Worktree</span>
+                <div className="space-y-1.5">
+                  {hasWorktree && worktreeStatus?.worktree_path ? (
+                    <>
+                      <div className="flex items-center gap-1.5">
+                        <FolderOpen className="size-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
+                        <span className="font-mono text-xs text-zinc-200 truncate">
+                          {formatWorktreePath(worktreeStatus.worktree_path)}
+                        </span>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        className="h-6 px-2 text-[10px] text-zinc-400 hover:text-zinc-200"
+                        onClick={handleOpenInIDE}
+                      >
+                        <ExternalLink className="size-3 mr-1" aria-hidden="true" />
+                        Open in IDE
+                      </Button>
+                    </>
+                  ) : (
+                    <span className="text-xs text-zinc-500">No worktree</span>
                   )}
                 </div>
               </div>
@@ -311,6 +489,195 @@ export function BeadDetail({
               </div>
             </div>
           </div>
+
+          {/* Pull Request Section */}
+          {hasWorktree && projectPath && (
+            <div className="mt-6">
+              <h3 className="text-sm font-semibold mb-2 text-zinc-200">Pull Request</h3>
+              <div className="h-px bg-zinc-800 mb-3" />
+
+              {/* Loading state */}
+              {isPRStatusLoading && (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+                  <div className="flex items-center gap-2 text-sm text-zinc-400">
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    <span>Loading PR status...</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Error state */}
+              {actionError && (
+                <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+                  <p className="text-sm text-red-400">{actionError}</p>
+                </div>
+              )}
+
+              {/* No remote state */}
+              {!isPRStatusLoading && prStatus && !prStatus.has_remote && (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+                  <p className="text-sm text-zinc-400">
+                    No remote configured. Push to a remote to enable PR features.
+                  </p>
+                </div>
+              )}
+
+              {/* Branch not pushed state */}
+              {!isPRStatusLoading && prStatus?.has_remote && !prStatus.branch_pushed && (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-zinc-400">Branch not pushed to remote</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      disabled
+                    >
+                      <Upload className="size-3.5" aria-hidden="true" />
+                      Push Branch
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* No PR yet - show Create PR button */}
+              {!isPRStatusLoading && prStatus?.has_remote && prStatus.branch_pushed && !prStatus.pr && (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-zinc-400">No pull request created yet</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={handleCreatePR}
+                      disabled={isCreatingPR}
+                    >
+                      {isCreatingPR ? (
+                        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <GitPullRequest className="size-3.5" aria-hidden="true" />
+                      )}
+                      Create PR
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* PR exists - show status and actions */}
+              {!isPRStatusLoading && prStatus?.pr && (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 space-y-4">
+                  {/* PR Header */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <GitPullRequest className="size-4 text-zinc-400" aria-hidden="true" />
+                      <span className="text-sm font-medium text-zinc-200">
+                        PR #{prStatus.pr.number}
+                      </span>
+                      {prStatus.pr.state === "merged" && (
+                        <Badge className="text-[10px] px-1.5 py-0 bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                          Merged
+                        </Badge>
+                      )}
+                    </div>
+                    <div className={cn("flex items-center gap-1", getChecksStatusDisplay(prStatus.pr.checks).className)}>
+                      {getChecksStatusDisplay(prStatus.pr.checks).icon}
+                      <span className="text-sm tabular-nums">
+                        {getChecksStatusDisplay(prStatus.pr.checks).text}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* CI Checks (if any) */}
+                  {prStatus.pr.checks.total > 0 && prStatus.pr.state !== "merged" && (
+                    <div className="space-y-2">
+                      <span className="text-xs text-zinc-500">Checks</span>
+                      <div className="space-y-1.5">
+                        {/* Show summary of checks */}
+                        <div className="flex items-center gap-4 text-xs">
+                          {prStatus.pr.checks.passed > 0 && (
+                            <span className="flex items-center gap-1 text-green-400">
+                              <Check className="size-3" aria-hidden="true" />
+                              {prStatus.pr.checks.passed} passed
+                            </span>
+                          )}
+                          {prStatus.pr.checks.failed > 0 && (
+                            <span className="flex items-center gap-1 text-red-400">
+                              <X className="size-3" aria-hidden="true" />
+                              {prStatus.pr.checks.failed} failed
+                            </span>
+                          )}
+                          {prStatus.pr.checks.pending > 0 && (
+                            <span className="flex items-center gap-1 text-amber-400">
+                              <Clock className="size-3" aria-hidden="true" />
+                              {prStatus.pr.checks.pending} pending
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-2 pt-2">
+                    {/* View PR button */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      asChild
+                    >
+                      <a
+                        href={prStatus.pr.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <ExternalLink className="size-3.5" aria-hidden="true" />
+                        View PR
+                      </a>
+                    </Button>
+
+                    {/* Merge PR button - only if checks passed and PR is open */}
+                    {prStatus.pr.state === "open" &&
+                      prStatus.pr.checks.status === "success" &&
+                      prStatus.pr.mergeable && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-1.5 border-green-600/30 text-green-400 hover:bg-green-500/10"
+                          onClick={handleMergePR}
+                          disabled={isMergingPR}
+                        >
+                          {isMergingPR ? (
+                            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                          ) : (
+                            <GitMerge className="size-3.5" aria-hidden="true" />
+                          )}
+                          Merge PR
+                        </Button>
+                      )}
+
+                    {/* Clean Up button - only if PR is merged */}
+                    {prStatus.pr.state === "merged" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5 border-zinc-600/30 text-zinc-400 hover:bg-zinc-500/10"
+                        onClick={handleCleanUp}
+                        disabled={isCleaningUp}
+                      >
+                        {isCleaningUp ? (
+                          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                        ) : (
+                          <Trash2 className="size-3.5" aria-hidden="true" />
+                        )}
+                        Clean Up
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Description */}
           {bead.description && (

@@ -1,141 +1,124 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog"
+import { AlertDialog } from "@base-ui/react/alert-dialog";
+import type React from "react";
+import { cn } from "@/lib/utils";
 
-import { cn } from "@/lib/utils"
-import { buttonVariants } from "@/components/ui/button"
+function AlertDialogRoot({ ...props }: AlertDialog.Root.Props) {
+  return <AlertDialog.Root {...props} />;
+}
 
-const AlertDialog = AlertDialogPrimitive.Root
+function AlertDialogTrigger({ ...props }: AlertDialog.Trigger.Props) {
+  return <AlertDialog.Trigger data-slot="alert-dialog-trigger" nativeButton {...props} />;
+}
 
-const AlertDialogTrigger = AlertDialogPrimitive.Trigger
+const AlertDialogPortal = AlertDialog.Portal;
 
-const AlertDialogPortal = AlertDialogPrimitive.Portal
-
-const AlertDialogOverlay = React.forwardRef<
-  React.ElementRef<typeof AlertDialogPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Overlay
-    className={cn(
-      "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-      className
-    )}
-    {...props}
-    ref={ref}
-  />
-))
-AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName
-
-const AlertDialogContent = React.forwardRef<
-  React.ElementRef<typeof AlertDialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
->(({ className, ...props }, ref) => (
-  <AlertDialogPortal>
-    <AlertDialogOverlay />
-    <AlertDialogPrimitive.Content
-      ref={ref}
+function AlertDialogBackdrop({ className, ...props }: AlertDialog.Backdrop.Props) {
+  return (
+    <AlertDialog.Backdrop
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border border-zinc-800 bg-zinc-900 p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+        "fixed inset-0 z-[var(--dialog-z)] bg-[var(--dialog-overlay)] transition-opacity duration-150",
+        "data-[ending-style]:opacity-0 data-[starting-style]:opacity-0",
         className
       )}
+      data-slot="alert-dialog-backdrop"
       {...props}
     />
-  </AlertDialogPortal>
-))
-AlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName
+  );
+}
 
-const AlertDialogHeader = ({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn(
-      "flex flex-col space-y-2 text-center sm:text-left",
-      className
-    )}
-    {...props}
-  />
-)
-AlertDialogHeader.displayName = "AlertDialogHeader"
+const popupStyles = cn(
+  "fixed top-1/2 left-1/2 z-[101] grid max-h-[85vh] w-full max-w-[32rem] overflow-y-auto",
+  "gap-4 rounded-[var(--radius)] border-none p-6",
+  "shadow-[0_0_0_1px_oklch(from_var(--border)_l_c_h_/_0.5),var(--shadow-border-stack)]",
+  "-translate-x-1/2 -translate-y-1/2 bg-[var(--mix-card-5-bg)]",
+  "transition-all duration-150",
+  "data-[starting-style]:-translate-x-1/2 data-[starting-style]:-translate-y-1/2 data-[starting-style]:scale-95 data-[starting-style]:opacity-0",
+  "data-[ending-style]:-translate-x-1/2 data-[ending-style]:-translate-y-1/2 data-[ending-style]:scale-95 data-[ending-style]:opacity-0",
+  "max-sm:-translate-y-1/2 max-sm:top-1/2 max-sm:right-4 max-sm:left-4 max-sm:w-[calc(100vw-2rem)] max-sm:max-w-none max-sm:translate-x-0",
+  "max-sm:data-[starting-style]:-translate-y-1/2 max-sm:data-[starting-style]:scale-90 max-sm:data-[starting-style]:opacity-0",
+  "max-sm:data-[ending-style]:-translate-y-1/2 max-sm:data-[ending-style]:scale-90 max-sm:data-[ending-style]:opacity-0"
+);
 
-const AlertDialogFooter = ({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn(
-      "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
-      className
-    )}
-    {...props}
-  />
-)
-AlertDialogFooter.displayName = "AlertDialogFooter"
+function AlertDialogPopup({ className, children, ...props }: AlertDialog.Popup.Props) {
+  return (
+    <AlertDialogPortal>
+      <AlertDialog.Popup className={cn(popupStyles, className)} data-slot="alert-dialog-popup" {...props}>
+        {children}
+      </AlertDialog.Popup>
+    </AlertDialogPortal>
+  );
+}
 
-const AlertDialogTitle = React.forwardRef<
-  React.ElementRef<typeof AlertDialogPrimitive.Title>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Title>
->(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Title
-    ref={ref}
-    className={cn("text-lg font-semibold text-zinc-100", className)}
-    {...props}
-  />
-))
-AlertDialogTitle.displayName = AlertDialogPrimitive.Title.displayName
+function AlertDialogContent({ className, children, ...props }: AlertDialog.Popup.Props) {
+  return (
+    <AlertDialogPortal>
+      <AlertDialogBackdrop />
+      <AlertDialog.Popup className={cn(popupStyles, className)} data-slot="alert-dialog-popup" {...props}>
+        {children}
+      </AlertDialog.Popup>
+    </AlertDialogPortal>
+  );
+}
 
-const AlertDialogDescription = React.forwardRef<
-  React.ElementRef<typeof AlertDialogPrimitive.Description>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Description>
->(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Description
-    ref={ref}
-    className={cn("text-sm text-zinc-400", className)}
-    {...props}
-  />
-))
-AlertDialogDescription.displayName =
-  AlertDialogPrimitive.Description.displayName
+function AlertDialogTitle({ className, ...props }: AlertDialog.Title.Props) {
+  return (
+    <AlertDialog.Title
+      className={cn("m-0 font-semibold text-foreground text-lg leading-none tracking-tight", className)}
+      data-slot="alert-dialog-title"
+      {...props}
+    />
+  );
+}
 
-const AlertDialogAction = React.forwardRef<
-  React.ElementRef<typeof AlertDialogPrimitive.Action>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Action>
->(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Action
-    ref={ref}
-    className={cn(buttonVariants(), className)}
-    {...props}
-  />
-))
-AlertDialogAction.displayName = AlertDialogPrimitive.Action.displayName
+function AlertDialogDescription({ className, ...props }: AlertDialog.Description.Props) {
+  return (
+    <AlertDialog.Description
+      className={cn("m-0 text-secondary-foreground text-sm leading-[1.5]", className)}
+      data-slot="alert-dialog-description"
+      {...props}
+    />
+  );
+}
 
-const AlertDialogCancel = React.forwardRef<
-  React.ElementRef<typeof AlertDialogPrimitive.Cancel>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Cancel>
->(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Cancel
-    ref={ref}
-    className={cn(
-      buttonVariants({ variant: "outline" }),
-      "mt-2 sm:mt-0",
-      className
-    )}
-    {...props}
-  />
-))
-AlertDialogCancel.displayName = AlertDialogPrimitive.Cancel.displayName
+function AlertDialogClose({ ...props }: AlertDialog.Close.Props) {
+  return <AlertDialog.Close data-slot="alert-dialog-close" nativeButton {...props} />;
+}
+
+const AlertDialogOverlay = AlertDialogBackdrop;
+
+function AlertDialogHeader({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      className={cn("flex flex-col gap-2 text-left [&_h2]:m-0 [&_p]:m-0", className)}
+      data-slot="alert-dialog-header"
+      {...props}
+    />
+  );
+}
+
+function AlertDialogFooter({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      className={cn("flex flex-col-reverse gap-2", "sm:flex-row sm:justify-end", className)}
+      data-slot="alert-dialog-footer"
+      {...props}
+    />
+  );
+}
 
 export {
-  AlertDialog,
-  AlertDialogPortal,
-  AlertDialogOverlay,
-  AlertDialogTrigger,
+  AlertDialogRoot as AlertDialog,
+  AlertDialogClose,
   AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogFooter,
-  AlertDialogTitle,
   AlertDialogDescription,
-  AlertDialogAction,
-  AlertDialogCancel,
-}
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogOverlay,
+  AlertDialogPopup,
+  AlertDialogPortal,
+  AlertDialogRoot,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+};

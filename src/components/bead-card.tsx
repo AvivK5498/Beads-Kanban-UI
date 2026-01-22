@@ -2,59 +2,135 @@
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { Bead } from "@/types";
+import type { Bead, WorktreeStatus, PRStatus } from "@/types";
 import type { BranchStatus } from "@/lib/git";
-import { GitBranch, MessageSquare } from "lucide-react";
+import { FolderOpen, GitPullRequest, MessageSquare, Check, X, Clock } from "lucide-react";
 
 export interface BeadCardProps {
   bead: Bead;
   ticketNumber?: number;
+  /** @deprecated Use worktreeStatus instead */
   branchStatus?: BranchStatus;
+  /** Worktree status for the bead */
+  worktreeStatus?: WorktreeStatus;
+  /** Mini PR status for card display */
+  prStatus?: PRStatus;
   isSelected?: boolean;
   onSelect: (bead: Bead) => void;
 }
 
 /**
- * Get branch badge color based on ahead/behind status
- * Dark theme variant with semi-transparent backgrounds
- * Red: diverged (needs rebase)
- * Green: ahead only (ready to merge)
- * Gray: behind only (merged/stale branch)
- * Green: up to date (synced)
+ * Get worktree status color for the status box
+ * Green: PR merged or checks passed
+ * Yellow/amber: checks pending
+ * Red: checks failed or needs rebase
+ * Gray: no PR or default state
  */
-function getBranchBadgeColor(status: BranchStatus): string {
-  const { ahead, behind } = status;
+function getWorktreeStatusColor(worktreeStatus?: WorktreeStatus, prStatus?: PRStatus): string {
+  if (!worktreeStatus?.exists) {
+    return "bg-zinc-800/50 border-zinc-700/50";
+  }
+
+  // Check PR status first
+  if (prStatus?.pr) {
+    const { state, checks } = prStatus.pr;
+
+    if (state === "merged") {
+      return "bg-green-500/10 border-green-600/30";
+    }
+
+    if (checks.status === "success") {
+      return "bg-green-500/10 border-green-600/30";
+    }
+
+    if (checks.status === "pending") {
+      return "bg-amber-500/10 border-amber-600/30";
+    }
+
+    if (checks.status === "failure") {
+      return "bg-red-500/10 border-red-600/30";
+    }
+  }
+
+  // Check worktree ahead/behind
+  const { ahead, behind } = worktreeStatus;
 
   if (ahead > 0 && behind > 0) {
     // Needs rebase - red
-    return "bg-red-500/10 text-red-400 border-red-600/30";
-  } else if (ahead > 0 && behind === 0) {
-    // Ready to merge - green
-    return "bg-green-500/10 text-green-400 border-green-600/30";
-  } else if (ahead === 0 && behind > 0) {
-    // Merged/stale - gray
-    return "bg-zinc-500/10 text-zinc-400 border-zinc-600/30";
-  } else {
-    // Synced (ahead=0, behind=0) - green
-    return "bg-green-500/10 text-green-400 border-green-600/30";
+    return "bg-red-500/10 border-red-600/30";
   }
+
+  if (ahead > 0 && behind === 0) {
+    // Ready to push/PR - green
+    return "bg-green-500/10 border-green-600/30";
+  }
+
+  return "bg-zinc-800/50 border-zinc-700/50";
 }
 
 /**
- * Get human-readable label for branch status
- * Returns short labels (up to 3 words) based on ahead/behind counts
+ * Get the PR checks display icon and text
  */
-function getBranchStatusLabel(status: BranchStatus): string {
-  const { ahead, behind } = status;
+function getPRChecksDisplay(prStatus: PRStatus): { icon: React.ReactNode; text: string; className: string } {
+  const { pr } = prStatus;
 
-  if (ahead > 0 && behind > 0) {
-    return "Needs rebase";
-  } else if (ahead > 0 && behind === 0) {
-    return "Ready to merge";
-  } else if (ahead === 0 && behind > 0) {
-    return "Merged";
+  if (!pr) {
+    return { icon: null, text: "", className: "" };
   }
-  return "Synced";
+
+  if (pr.state === "merged") {
+    return {
+      icon: <Check className="size-3" aria-hidden="true" />,
+      text: "Merged",
+      className: "text-green-400"
+    };
+  }
+
+  const { checks } = pr;
+  const checksText = `${checks.passed}/${checks.total}`;
+
+  if (checks.status === "success") {
+    return {
+      icon: <Check className="size-3" aria-hidden="true" />,
+      text: checksText,
+      className: "text-green-400"
+    };
+  }
+
+  if (checks.status === "pending") {
+    return {
+      icon: <Clock className="size-3" aria-hidden="true" />,
+      text: checksText,
+      className: "text-amber-400"
+    };
+  }
+
+  if (checks.status === "failure") {
+    return {
+      icon: <X className="size-3" aria-hidden="true" />,
+      text: checksText,
+      className: "text-red-400"
+    };
+  }
+
+  return { icon: null, text: checksText, className: "text-zinc-400" };
+}
+
+/**
+ * Format worktree path for display (shorten if needed)
+ */
+function formatWorktreePath(path: string): string {
+  // Extract the relative part after .worktrees/
+  const match = path.match(/\.worktrees\/(.+)$/);
+  if (match) {
+    return `.worktrees/${match[1]}`;
+  }
+  // Fallback: show last two path segments
+  const parts = path.split("/");
+  if (parts.length >= 2) {
+    return parts.slice(-2).join("/");
+  }
+  return path;
 }
 
 /**
@@ -93,10 +169,20 @@ function formatBeadId(id: string): string {
   return `BD-${shortId.slice(0, 6)}`;
 }
 
-export function BeadCard({ bead, ticketNumber, branchStatus, isSelected = false, onSelect }: BeadCardProps) {
+export function BeadCard({ bead, ticketNumber, branchStatus, worktreeStatus, prStatus, isSelected = false, onSelect }: BeadCardProps) {
   const blocked = isBlocked(bead);
   const commentCount = (bead.comments ?? []).length;
+
+  // Prefer worktree status over branch status
+  const hasWorktree = worktreeStatus?.exists ?? false;
+  const hasPR = prStatus?.pr !== null && prStatus?.pr !== undefined;
+
+  // Fallback to legacy branch status if no worktree status provided
   const branchExists = branchStatus?.exists ?? false;
+  const showLegacyBranch = !worktreeStatus && branchExists;
+
+  // Get PR checks display info
+  const prChecksDisplay = prStatus ? getPRChecksDisplay(prStatus) : null;
 
   return (
     <div
@@ -166,28 +252,95 @@ export function BeadCard({ bead, ticketNumber, branchStatus, isSelected = false,
         {commentCount > 0 && (
           <div className="flex items-center pt-1">
             <span className="flex items-center gap-1 text-[10px] text-zinc-500">
-              <MessageSquare className="h-3 w-3" aria-hidden="true" />
+              <MessageSquare className="size-3" aria-hidden="true" />
               {commentCount} {commentCount === 1 ? "comment" : "comments"}
             </span>
           </div>
         )}
 
-        {/* Branch badge with ahead/behind status */}
-        {branchExists && branchStatus && (
+        {/* Worktree and PR status box */}
+        {hasWorktree && worktreeStatus?.worktree_path && (
+          <div
+            className={cn(
+              "mt-2 rounded-md border p-2 space-y-1.5",
+              getWorktreeStatusColor(worktreeStatus, prStatus)
+            )}
+          >
+            {/* Worktree path row */}
+            <div className="flex items-center gap-1.5 text-[10px] text-zinc-400">
+              <FolderOpen className="size-3 shrink-0" aria-hidden="true" />
+              <span className="font-mono truncate">
+                {formatWorktreePath(worktreeStatus.worktree_path)}
+              </span>
+            </div>
+
+            {/* PR status row (if PR exists) */}
+            {hasPR && prStatus?.pr && prChecksDisplay && (
+              <div className="flex items-center justify-between text-[10px]">
+                <div className="flex items-center gap-1.5 text-zinc-300">
+                  <GitPullRequest className="size-3 shrink-0" aria-hidden="true" />
+                  <span>PR #{prStatus.pr.number}</span>
+                </div>
+                <div className={cn("flex items-center gap-1", prChecksDisplay.className)}>
+                  {prChecksDisplay.icon}
+                  <span className="tabular-nums">{prChecksDisplay.text}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Legacy branch badge (fallback when no worktree status) */}
+        {showLegacyBranch && branchStatus && (
           <div className="pt-1">
             <Badge
               variant="outline"
               className={cn(
                 "text-[10px] px-2 py-0.5",
-                getBranchBadgeColor(branchStatus)
+                getLegacyBranchBadgeColor(branchStatus)
               )}
             >
-              <GitBranch className="h-3 w-3 mr-1" aria-hidden="true" />
-              {getBranchStatusLabel(branchStatus)}
+              <FolderOpen className="size-3 mr-1" aria-hidden="true" />
+              {getLegacyBranchStatusLabel(branchStatus)}
             </Badge>
           </div>
         )}
       </div>
     </div>
   );
+}
+
+/**
+ * Legacy: Get branch badge color based on ahead/behind status
+ * @deprecated Used only for backward compatibility when worktreeStatus is not provided
+ */
+function getLegacyBranchBadgeColor(status: BranchStatus): string {
+  const { ahead, behind } = status;
+
+  if (ahead > 0 && behind > 0) {
+    return "bg-red-500/10 text-red-400 border-red-600/30";
+  } else if (ahead > 0 && behind === 0) {
+    return "bg-green-500/10 text-green-400 border-green-600/30";
+  } else if (ahead === 0 && behind > 0) {
+    return "bg-zinc-500/10 text-zinc-400 border-zinc-600/30";
+  } else {
+    return "bg-green-500/10 text-green-400 border-green-600/30";
+  }
+}
+
+/**
+ * Legacy: Get human-readable label for branch status
+ * @deprecated Used only for backward compatibility when worktreeStatus is not provided
+ */
+function getLegacyBranchStatusLabel(status: BranchStatus): string {
+  const { ahead, behind } = status;
+
+  if (ahead > 0 && behind > 0) {
+    return "Needs rebase";
+  } else if (ahead > 0 && behind === 0) {
+    return "Ready to merge";
+  } else if (ahead === 0 && behind > 0) {
+    return "Merged";
+  }
+  return "Synced";
 }

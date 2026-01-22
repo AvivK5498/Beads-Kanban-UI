@@ -6,6 +6,19 @@ import { getTags, createTag, deleteTag, type Tag } from "@/lib/db";
 import { ColorPicker } from "@/components/color-picker";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  usePRSettings,
+  MIN_POLLING_INTERVAL,
+  MAX_POLLING_INTERVAL,
+} from "@/hooks/use-pr-settings";
+import type { MergeMethod } from "@/lib/api";
+
+/** Merge method options for the radio group */
+const MERGE_METHOD_OPTIONS: { value: MergeMethod; label: string }[] = [
+  { value: "merge", label: "Merge commit" },
+  { value: "squash", label: "Squash and merge" },
+  { value: "rebase", label: "Rebase and merge" },
+];
 
 export default function SettingsPage() {
   const [tags, setTags] = useState<Tag[]>([]);
@@ -13,6 +26,9 @@ export default function SettingsPage() {
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState("#3b82f6");
   const [isLoading, setIsLoading] = useState(true);
+
+  // PR settings hook
+  const { settings: prSettings, isLoaded: prSettingsLoaded, updateSetting } = usePRSettings();
 
   useEffect(() => {
     async function loadTags() {
@@ -196,6 +212,99 @@ export default function SettingsPage() {
                 >
                   Add Tag
                 </button>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* PR Status Settings Section */}
+        <section className="mb-8">
+          <h2 className="mb-4 text-lg font-medium text-zinc-100">PR Status Settings</h2>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+            {!prSettingsLoaded ? (
+              <p className="text-sm text-zinc-400">Loading settings...</p>
+            ) : (
+              <div className="space-y-6">
+                {/* Polling Interval */}
+                <div>
+                  <label
+                    htmlFor="polling-interval"
+                    className="block text-sm font-medium text-zinc-200"
+                  >
+                    Polling interval
+                  </label>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <Input
+                      id="polling-interval"
+                      type="number"
+                      min={MIN_POLLING_INTERVAL}
+                      max={MAX_POLLING_INTERVAL}
+                      value={prSettings.pollingInterval}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        if (!isNaN(value)) {
+                          updateSetting("pollingInterval", value);
+                        }
+                      }}
+                      className="w-20 border-zinc-700 bg-zinc-800 text-zinc-100 tabular-nums"
+                      aria-describedby="polling-interval-hint"
+                    />
+                    <span className="text-sm text-zinc-400">seconds</span>
+                  </div>
+                  <p id="polling-interval-hint" className="mt-1 text-xs text-zinc-500">
+                    ({MIN_POLLING_INTERVAL}-{MAX_POLLING_INTERVAL})
+                  </p>
+                </div>
+
+                {/* Default Merge Method */}
+                <fieldset>
+                  <legend className="text-sm font-medium text-zinc-200">
+                    Default merge method
+                  </legend>
+                  <div className="mt-2 space-y-2" role="radiogroup" aria-label="Default merge method">
+                    {MERGE_METHOD_OPTIONS.map((option) => (
+                      <label
+                        key={option.value}
+                        className="flex cursor-pointer items-center gap-2"
+                      >
+                        <input
+                          type="radio"
+                          name="merge-method"
+                          value={option.value}
+                          checked={prSettings.mergeMethod === option.value}
+                          onChange={() => updateSetting("mergeMethod", option.value)}
+                          className="size-4 border-zinc-600 bg-zinc-800 text-zinc-100 focus:ring-zinc-400 focus:ring-offset-[#0a0a0a]"
+                        />
+                        <span className="text-sm text-zinc-300">{option.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+
+                {/* Boolean Settings */}
+                <div className="space-y-3">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={prSettings.showRateLimitWarnings}
+                      onChange={(e) =>
+                        updateSetting("showRateLimitWarnings", e.target.checked)
+                      }
+                      className="size-4 rounded border-zinc-600 bg-zinc-800 text-zinc-100 focus:ring-zinc-400 focus:ring-offset-[#0a0a0a]"
+                    />
+                    <span className="text-sm text-zinc-300">Show rate limit warnings</span>
+                  </label>
+
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={prSettings.autoMerge}
+                      onChange={(e) => updateSetting("autoMerge", e.target.checked)}
+                      className="size-4 rounded border-zinc-600 bg-zinc-800 text-zinc-100 focus:ring-zinc-400 focus:ring-offset-[#0a0a0a]"
+                    />
+                    <span className="text-sm text-zinc-300">Auto-merge when checks pass</span>
+                  </label>
+                </div>
               </div>
             )}
           </div>

@@ -3,6 +3,10 @@
  *
  * Provides functions to check branch existence and ahead/behind status
  * relative to the main branch.
+ *
+ * @deprecated This module is deprecated. Use the worktree API endpoints instead.
+ * Branch-based workflow is being phased out in favor of worktrees.
+ * See `api.git.worktreeStatus()` and `api.git.createWorktree()` for the new workflow.
  */
 
 import * as api from './api';
@@ -21,6 +25,8 @@ export interface BranchStatus {
 
 /**
  * Get branch status (exists, ahead, behind) relative to main
+ *
+ * @deprecated Use `api.git.worktreeStatus()` instead. Branch-based workflow is deprecated.
  *
  * @param projectPath - Absolute path to the git repository
  * @param branchName - Name of the branch to check status for
@@ -44,6 +50,8 @@ export async function getBranchStatus(
 /**
  * Check if a branch exists locally
  *
+ * @deprecated Use `api.git.worktreeStatus()` instead. Branch-based workflow is deprecated.
+ *
  * @param projectPath - Absolute path to the git repository
  * @param branchName - Name of the branch to check
  * @returns Promise resolving to true if branch exists
@@ -65,6 +73,8 @@ export async function branchExists(
  * Get branch statuses for multiple branches in batch
  *
  * Runs checks in parallel for efficiency.
+ *
+ * @deprecated Use the worktree API instead. Branch-based workflow is deprecated.
  *
  * @param projectPath - Absolute path to the git repository
  * @param branchNames - Array of branch names to check

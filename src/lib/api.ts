@@ -192,10 +192,28 @@ export interface MergePRResponse {
 export type MergeMethod = 'merge' | 'squash' | 'rebase';
 
 /**
+ * GitHub status response
+ */
+export interface GitHubStatusResponse {
+  has_remote: boolean;
+  gh_authenticated: boolean;
+  error?: string;
+}
+
+/**
  * Git API
  */
 export const git = {
-  // Existing branch status endpoint
+  /**
+   * Get GitHub status for a repository
+   */
+  githubStatus: (repoPath: string) => fetchApi<GitHubStatusResponse>(
+    `/api/git/github-status?repo_path=${encodeURIComponent(repoPath)}`
+  ),
+  /**
+   * Get branch status relative to main
+   * @deprecated Use `worktreeStatus()` instead. Branch-based workflow is deprecated in favor of worktrees.
+   */
   branchStatus: (path: string, branch: string) => fetchApi<BranchStatus>(
     `/api/git/branch-status?path=${encodeURIComponent(path)}&branch=${encodeURIComponent(branch)}`
   ),
