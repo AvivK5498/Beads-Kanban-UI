@@ -11,8 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
+  AlertDialogClose,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -325,7 +324,7 @@ export function ScanDirectoryDialog({
             <AlertDialogTitle>
               Add {selectedCount} Project{selectedCount !== 1 ? "s" : ""}?
             </AlertDialogTitle>
-            <AlertDialogDescription asChild>
+            <AlertDialogDescription>
               <div>
                 <p className="mb-3">
                   The following projects will be added to your dashboard:
@@ -349,17 +348,17 @@ export function ScanDirectoryDialog({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isAdding}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleAddProjects} disabled={isAdding}>
+            <AlertDialogClose render={<Button variant="outline" disabled={isAdding}>Cancel</Button>} />
+            <Button onClick={handleAddProjects} disabled={isAdding}>
               {isAdding ? (
                 <>
                   <Loader2 className="size-4 animate-spin" />
-                  Adding...
+                  Adding…
                 </>
               ) : (
                 "Add All"
               )}
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
