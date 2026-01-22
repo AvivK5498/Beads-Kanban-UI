@@ -15,6 +15,10 @@ import { EditableProjectName } from "@/components/editable-project-name";
 import { useBeads } from "@/hooks/use-beads";
 import { useProject } from "@/hooks/use-project";
 import { useBeadFilters } from "@/hooks/use-bead-filters";
+/**
+ * @deprecated useBranchStatuses is deprecated. Use useWorktreeStatuses instead.
+ * TODO: Migrate to useWorktreeStatuses for the worktree-based workflow.
+ */
 import { useBranchStatuses } from "@/hooks/use-branch-statuses";
 import { useKeyboardNavigation } from "@/hooks/use-keyboard-navigation";
 import type { Bead, BeadStatus } from "@/types";
@@ -93,7 +97,8 @@ export default function KanbanBoard() {
     setFilters({ owners: newOwners });
   }, [filters.owners, setFilters]);
 
-  // Fetch branch statuses for all beads
+  // @deprecated: Branch statuses are deprecated. TODO: migrate to useWorktreeStatuses
+  // Fetch branch statuses for all beads (legacy - for backward compatibility)
   const beadIds = useMemo(() => beads.map((b) => b.id), [beads]);
   const { statuses: branchStatuses } = useBranchStatuses(
     project?.path ?? "",

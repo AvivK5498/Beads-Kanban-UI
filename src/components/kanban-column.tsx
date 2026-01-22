@@ -6,6 +6,9 @@ import { BeadCard } from "@/components/bead-card";
 import { EpicCard } from "@/components/epic-card";
 import { cn } from "@/lib/utils";
 import type { Bead, BeadStatus, Epic } from "@/types";
+/**
+ * @deprecated BranchStatus is deprecated. Use WorktreeStatus from "@/types" instead.
+ */
 import type { BranchStatus } from "@/lib/git";
 
 export interface KanbanColumnProps {
@@ -16,6 +19,10 @@ export interface KanbanColumnProps {
   allBeads: Bead[];
   selectedBeadId?: string | null;
   ticketNumbers?: Map<string, number>;
+  /**
+   * @deprecated Use worktree statuses instead. Branch-based workflow is deprecated.
+   * This prop will be removed in a future version.
+   */
   branchStatuses?: Record<string, BranchStatus>;
   onSelectBead: (bead: Bead) => void;
   onChildClick?: (child: Bead) => void;
