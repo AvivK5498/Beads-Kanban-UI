@@ -1107,6 +1107,9 @@ async fn get_pr_info(repo_path: &str, branch: &str) -> Option<PrInfo> {
 }
 
 /// Parse status check rollup from gh pr view output.
+/// GitHub Actions returns:
+/// - status: "QUEUED" | "IN_PROGRESS" | "COMPLETED"
+/// - conclusion: "" | "SUCCESS" | "FAILURE" | "CANCELLED" (only set when COMPLETED)
 fn parse_status_checks(rollup: &serde_json::Value) -> ChecksStatus {
     let mut total = 0;
     let mut passed = 0;
@@ -1116,13 +1119,22 @@ fn parse_status_checks(rollup: &serde_json::Value) -> ChecksStatus {
     if let Some(checks) = rollup.as_array() {
         for check in checks {
             total += 1;
-            let state = check["state"].as_str().unwrap_or("");
+            let status = check["status"].as_str().unwrap_or("");
             let conclusion = check["conclusion"].as_str().unwrap_or("");
 
-            match (state, conclusion) {
-                ("SUCCESS", _) | (_, "SUCCESS") => passed += 1,
-                ("FAILURE", _) | (_, "FAILURE") | ("ERROR", _) | (_, "ERROR") => failed += 1,
-                _ => pending += 1,
+            match status {
+                "QUEUED" | "IN_PROGRESS" => pending += 1,
+                "COMPLETED" => match conclusion {
+                    "SUCCESS" => passed += 1,
+                    "FAILURE" | "CANCELLED" | "TIMED_OUT" | "ACTION_REQUIRED" => failed += 1,
+                    _ => pending += 1, // Unknown conclusion treated as pending
+                },
+                // Legacy status check API uses state/conclusion differently
+                _ => match conclusion {
+                    "SUCCESS" => passed += 1,
+                    "FAILURE" | "ERROR" => failed += 1,
+                    _ => pending += 1,
+                },
             }
         }
     }
@@ -1260,11 +1272,43 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_status_checks_mixed() {
+    fn test_parse_status_checks_queued() {
+        // QUEUED status should count as pending
         let rollup = serde_json::json!([
-            {"state": "SUCCESS", "conclusion": ""},
-            {"state": "PENDING", "conclusion": ""},
-            {"state": "FAILURE", "conclusion": ""}
+            {"status": "QUEUED", "conclusion": ""},
+            {"status": "IN_PROGRESS", "conclusion": ""}
+        ]);
+        let checks = parse_status_checks(&rollup);
+        assert_eq!(checks.total, 2);
+        assert_eq!(checks.pending, 2);
+        assert_eq!(checks.passed, 0);
+        assert_eq!(checks.failed, 0);
+        assert_eq!(checks.status, "pending");
+    }
+
+    #[test]
+    fn test_parse_status_checks_completed() {
+        // COMPLETED status uses conclusion field
+        let rollup = serde_json::json!([
+            {"status": "COMPLETED", "conclusion": "SUCCESS"},
+            {"status": "COMPLETED", "conclusion": "FAILURE"},
+            {"status": "COMPLETED", "conclusion": "CANCELLED"}
+        ]);
+        let checks = parse_status_checks(&rollup);
+        assert_eq!(checks.total, 3);
+        assert_eq!(checks.passed, 1);
+        assert_eq!(checks.failed, 2); // FAILURE + CANCELLED
+        assert_eq!(checks.pending, 0);
+        assert_eq!(checks.status, "failure");
+    }
+
+    #[test]
+    fn test_parse_status_checks_mixed() {
+        // Mix of queued, in-progress, and completed checks
+        let rollup = serde_json::json!([
+            {"status": "COMPLETED", "conclusion": "SUCCESS"},
+            {"status": "QUEUED", "conclusion": ""},
+            {"status": "COMPLETED", "conclusion": "FAILURE"}
         ]);
         let checks = parse_status_checks(&rollup);
         assert_eq!(checks.total, 3);
@@ -1272,5 +1316,19 @@ mod tests {
         assert_eq!(checks.pending, 1);
         assert_eq!(checks.failed, 1);
         assert_eq!(checks.status, "failure");
+    }
+
+    #[test]
+    fn test_parse_status_checks_all_success() {
+        let rollup = serde_json::json!([
+            {"status": "COMPLETED", "conclusion": "SUCCESS"},
+            {"status": "COMPLETED", "conclusion": "SUCCESS"}
+        ]);
+        let checks = parse_status_checks(&rollup);
+        assert_eq!(checks.total, 2);
+        assert_eq!(checks.passed, 2);
+        assert_eq!(checks.pending, 0);
+        assert_eq!(checks.failed, 0);
+        assert_eq!(checks.status, "success");
     }
 }
