@@ -34,7 +34,7 @@ function getColumnAccentBorder(status: BeadStatus): string {
     case "in_progress":
       return "border-t-2 border-t-amber-500/60";
     case "inreview":
-      return "border-t-2 border-t-purple-500/60";
+      return "border-t-2 border-t-cyan-500/60";
     case "closed":
       return "border-t-2 border-t-green-500/60";
     default:
@@ -52,7 +52,7 @@ function getHeaderTextColor(status: BeadStatus): string {
     case "in_progress":
       return "text-amber-400";
     case "inreview":
-      return "text-purple-400";
+      return "text-cyan-400";
     case "closed":
       return "text-green-400";
     default:
@@ -70,7 +70,7 @@ function getBadgeVariant(status: BeadStatus): string {
     case "in_progress":
       return "bg-amber-500/20 text-amber-400 border-amber-500/30 hover:bg-amber-500/20";
     case "inreview":
-      return "bg-purple-500/20 text-purple-400 border-purple-500/30 hover:bg-purple-500/20";
+      return "bg-cyan-500/20 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/20";
     case "closed":
       return "bg-green-500/20 text-green-400 border-green-500/30 hover:bg-green-500/20";
     default:

@@ -19,7 +19,7 @@ interface StatusDonutProps {
 const STATUS_COLORS = {
   open: "#3b82f6",        // blue-500
   in_progress: "#f59e0b", // amber-500
-  inreview: "#a855f7",    // purple-500
+  inreview: "#06b6d4",    // cyan-500
   closed: "#22c55e",      // green-500
 };
 
