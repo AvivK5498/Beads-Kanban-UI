@@ -29,6 +29,9 @@ import {
   GitBranch,
   Code,
   RefreshCw,
+  Layers,
+  Square,
+  Circle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -65,20 +68,20 @@ export interface BeadDetailProps {
 }
 
 /**
- * Get status badge color classes based on status
+ * Get status dot color class based on status
  */
-function getStatusColor(status: BeadStatus): string {
+function getStatusDotColor(status: BeadStatus): string {
   switch (status) {
     case "open":
-      return "bg-blue-500/20 text-blue-400 border-blue-500/30";
+      return "text-zinc-400";
     case "in_progress":
-      return "bg-amber-500/20 text-amber-400 border-amber-500/30";
+      return "text-blue-400";
     case "inreview":
-      return "bg-cyan-500/20 text-cyan-400 border-cyan-500/30";
+      return "text-purple-400";
     case "closed":
-      return "bg-green-500/20 text-green-400 border-green-500/30";
+      return "text-green-400";
     default:
-      return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
+      return "text-zinc-400";
   }
 }
 
@@ -129,6 +132,22 @@ function formatDate(dateString: string): string {
       hour12: false,
     });
     return `${datePart}, ${timePart}`;
+  } catch {
+    return dateString;
+  }
+}
+
+/**
+ * Format date for short display (e.g., "Jan 23" or "Jan 23, 2025")
+ */
+function formatShortDate(dateString: string): string {
+  try {
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: date.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined,
+    });
   } catch {
     return dateString;
   }
@@ -272,7 +291,6 @@ export function BeadDetail({
   onChildClick,
   onCleanup,
 }: BeadDetailProps) {
-  const branchName = `bd-${formatBeadId(bead.id)}`;
   const [isDesignDocFullScreen, setIsDesignDocFullScreen] = useState(false);
   const hasDesignDoc = !!bead.design_doc;
 
@@ -283,6 +301,10 @@ export function BeadDetail({
   const [isRebasingSiblings, setIsRebasingSiblings] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [isRefreshingPR, setIsRefreshingPR] = useState(false);
+
+  // Merge button delay state - wait for CI checks to load before showing merge button
+  const [mergeButtonReady, setMergeButtonReady] = useState(false);
+  const [isCheckingCI, setIsCheckingCI] = useState(false);
 
   // Fetch PR status when detail panel is open and we have a worktree
   const hasWorktree = worktreeStatus?.exists ?? false;
@@ -369,12 +391,42 @@ export function BeadDetail({
     }
   }, [isDesignDocFullScreen]);
 
-  // Clear action error when panel closes
+  // Clear action error and merge button state when panel closes
   useEffect(() => {
     if (!open) {
       setActionError(null);
+      setMergeButtonReady(false);
+      setIsCheckingCI(false);
     }
   }, [open]);
+
+  // Delay showing merge button by 2 seconds when PR loads with open state
+  // This allows CI checks to start before the user can merge
+  const prState = prStatus?.pr?.state;
+  const prNumber = prStatus?.pr?.number;
+  useEffect(() => {
+    // Only trigger when we have a PR that's open and loading has finished
+    if (isPRStatusLoading || !prState || prState !== "open") {
+      setMergeButtonReady(false);
+      setIsCheckingCI(false);
+      return;
+    }
+
+    // Start the 2 second delay
+    setIsCheckingCI(true);
+    setMergeButtonReady(false);
+
+    const timer = setTimeout(async () => {
+      // Re-fetch PR status to get updated checks
+      await refreshPRStatus();
+      setIsCheckingCI(false);
+      setMergeButtonReady(true);
+    }, 2000);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [isPRStatusLoading, prState, prNumber, refreshPRStatus]);
 
   /**
    * Handle creating a PR
@@ -538,118 +590,45 @@ export function BeadDetail({
             <SheetTitle className="text-xl font-semibold leading-tight text-zinc-100">
               {bead.title}
             </SheetTitle>
+
+            {/* Worktree path - below title, only if worktree exists */}
+            {bead.issue_type !== "epic" && hasWorktree && worktreeStatus?.worktree_path && (
+              <div className={cn(
+                "font-mono text-xs text-zinc-500",
+                bead.status === "closed" && "opacity-40"
+              )}>
+                {formatWorktreePath(worktreeStatus.worktree_path)}
+              </div>
+            )}
           </SheetHeader>
 
-          {/* Metadata Grid */}
-          <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              {/* Status */}
-              <div className="space-y-1">
-                <span className="text-zinc-500 text-xs">Status</span>
-                <div>
-                  <Badge
-                    variant="outline"
-                    className={cn("font-medium", getStatusColor(bead.status))}
-                  >
-                    {formatStatus(bead.status)}
-                  </Badge>
-                </div>
-              </div>
-
-              {/* Created at - top right, no label */}
-              <div className="flex items-start justify-end">
-                <div className="flex items-center gap-1.5">
-                  <Calendar className="h-3.5 w-3.5 text-zinc-500" aria-hidden="true" />
-                  <span className="text-xs text-zinc-400">{formatDate(bead.created_at)}</span>
-                </div>
-              </div>
-
-              {/* Type */}
-              <div className="space-y-1">
-                <span className="text-zinc-500 text-xs">Type</span>
-                <div>
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "font-normal capitalize",
-                      bead.issue_type === "task"
-                        ? "bg-cyan-500/20 text-cyan-400 border-cyan-500/30"
-                        : "text-zinc-200 border-zinc-700"
-                    )}
-                  >
-                    {bead.issue_type}
-                  </Badge>
-                </div>
-              </div>
-
-              {/* Worktree - only show for non-epic beads */}
-              {bead.issue_type !== "epic" && (
-                <div className="space-y-1">
-                  <span className="text-zinc-500 text-xs">Worktree</span>
-                  <div className="space-y-1.5">
-                    {bead.status === "closed" ? (
-                      // Closed tasks: show derived path with strikethrough
-                      <div className="flex items-center gap-1.5">
-                        <TreePine className="size-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
-                        <span className="line-through text-zinc-500 font-mono text-xs">
-                          {`.worktrees/bd-${bead.id}`}
-                        </span>
-                      </div>
-                    ) : hasWorktree && worktreeStatus?.worktree_path ? (
-                      // Active tasks with worktree: show live status
-                      <>
-                        <div className="flex items-center gap-1.5">
-                          <TreePine className="size-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
-                          <span className="font-mono text-xs text-zinc-200 truncate">
-                            {formatWorktreePath(worktreeStatus.worktree_path)}
-                          </span>
-                        </div>
-                        {/* Worktree status info - GitBranch icon with status text */}
-                        <div className="flex items-center justify-between">
-                          <span
-                            className={cn("flex items-center gap-1 text-xs", getWorktreeStatusInfo(worktreeStatus).className)}
-                          >
-                            <GitBranch className="size-3" aria-hidden="true" />
-                            {getWorktreeStatusInfo(worktreeStatus).text}
-                          </span>
-                          {/* Open in IDE dropdown - bottom right */}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                mode="icon"
-                                className="h-6 w-6 shrink-0"
-                                aria-label="Open worktree in external application"
-                              >
-                                <ExternalLink className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleOpenExternal('vscode')}>
-                                <Code className="h-4 w-4" aria-hidden="true" />
-                                VS Code
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleOpenExternal('cursor')}>
-                                <Code className="h-4 w-4" aria-hidden="true" />
-                                Cursor
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleOpenExternal('finder')}>
-                                <FolderOpen className="h-4 w-4" aria-hidden="true" />
-                                Finder
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </>
-                    ) : (
-                      // Active tasks without worktree
-                      <span className="text-xs text-zinc-500">No worktree</span>
-                    )}
-                  </div>
-                </div>
+          {/* Inline Metadata Row */}
+          <div className="mt-6 flex justify-center items-center gap-3 text-sm text-zinc-400">
+            {/* Type with icon */}
+            <span className="flex items-center gap-1.5">
+              {bead.issue_type === "epic" ? (
+                <Layers className="size-3.5" aria-hidden="true" />
+              ) : (
+                <Square className="size-3.5" aria-hidden="true" />
               )}
-            </div>
+              <span className="capitalize">{bead.issue_type}</span>
+            </span>
+
+            <span className="text-zinc-600" aria-hidden="true">•</span>
+
+            {/* Status with colored dot */}
+            <span className="flex items-center gap-1.5">
+              <Circle className={cn("size-2 fill-current", getStatusDotColor(bead.status))} aria-hidden="true" />
+              <span>{formatStatus(bead.status)}</span>
+            </span>
+
+            <span className="text-zinc-600" aria-hidden="true">•</span>
+
+            {/* Date with calendar icon */}
+            <span className="flex items-center gap-1.5">
+              <Calendar className="size-3.5" aria-hidden="true" />
+              <span>{formatShortDate(bead.created_at)}</span>
+            </span>
           </div>
 
           {/* Worktree & PR Section */}
@@ -827,8 +806,21 @@ export function BeadDetail({
                       </a>
                     </Button>
 
-                    {/* Merge PR button - only if checks passed and PR is open */}
+                    {/* Checking CI status indicator - shown during 2s delay */}
+                    {prStatus.pr.state === "open" && isCheckingCI && (
+                      <span
+                        role="status"
+                        aria-live="polite"
+                        className="flex items-center gap-1.5 text-xs text-zinc-500"
+                      >
+                        <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                        Checking CI status…
+                      </span>
+                    )}
+
+                    {/* Merge PR button - only if checks passed, PR is open, and delay has passed */}
                     {prStatus.pr.state === "open" &&
+                      mergeButtonReady &&
                       prStatus.pr.checks.status === "success" &&
                       prStatus.pr.mergeable && (
                         <Button
