@@ -127,6 +127,7 @@ async fn main() {
         .route("/api/git/pr-status", get(routes::worktree::pr_status))
         .route("/api/git/create-pr", post(routes::worktree::create_pr))
         .route("/api/git/merge-pr", post(routes::worktree::merge_pr))
+        .route("/api/git/rebase-siblings", post(routes::worktree::rebase_siblings))
         .route("/api/watch/beads", get(routes::watch_beads))
         .fallback(serve_static)
         .layer(cors);

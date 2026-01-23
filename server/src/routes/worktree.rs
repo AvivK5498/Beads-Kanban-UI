@@ -1178,6 +1178,226 @@ fn ensure_gitignore_entry(repo_path: &str) -> Result<(), std::io::Error> {
     Ok(())
 }
 
+// ============================================================================
+// Rebase Siblings Endpoint
+// ============================================================================
+
+/// Request body for rebasing sibling worktrees.
+#[derive(Deserialize)]
+pub struct RebaseSiblingsRequest {
+    /// Path to the git repository.
+    pub repo_path: String,
+    /// Bead ID to exclude from rebasing (the one just merged).
+    pub exclude_bead_id: String,
+}
+
+/// Result for a single sibling rebase operation.
+#[derive(Serialize)]
+pub struct RebaseSiblingResult {
+    /// Bead ID that was rebased.
+    pub bead_id: String,
+    /// Whether the rebase was successful.
+    pub success: bool,
+    /// Error message if rebase failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Response body for the rebase siblings endpoint.
+#[derive(Serialize)]
+pub struct RebaseSiblingsResponse {
+    /// Results for each sibling worktree.
+    pub results: Vec<RebaseSiblingResult>,
+}
+
+/// Rebase all sibling worktrees onto latest origin/main.
+///
+/// # Endpoint
+///
+/// `POST /api/git/rebase-siblings`
+///
+/// # Request Body
+///
+/// ```json
+/// {
+///   "repo_path": "/path/to/repo",
+///   "exclude_bead_id": "BD-001"
+/// }
+/// ```
+///
+/// # Response
+///
+/// Returns results for each sibling worktree rebase attempt.
+pub async fn rebase_siblings(Json(request): Json<RebaseSiblingsRequest>) -> impl IntoResponse {
+    let repo_path = Path::new(&request.repo_path);
+
+    // Validate repository path exists
+    if !repo_path.exists() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": format!("Repository path does not exist: {}", request.repo_path)
+            })),
+        )
+            .into_response();
+    }
+
+    // List all worktrees using git worktree list
+    let output = Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(&request.repo_path)
+        .output()
+        .await;
+
+    let worktrees = match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            parse_worktree_list(&stdout, &request.repo_path)
+        }
+        Ok(output) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": format!("Failed to list worktrees: {}", String::from_utf8_lossy(&output.stderr))
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": format!("Failed to run git command: {}", e)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Filter out the excluded bead and main worktree
+    let siblings: Vec<_> = worktrees
+        .into_iter()
+        .filter(|w| {
+            if let Some(ref bead_id) = w.bead_id {
+                bead_id != &request.exclude_bead_id
+            } else {
+                false // No bead_id means it's main worktree
+            }
+        })
+        .collect();
+
+    let mut results = Vec::new();
+
+    // Fetch latest from origin once (in main repo)
+    let fetch_output = Command::new("git")
+        .args(["fetch", "origin"])
+        .current_dir(&request.repo_path)
+        .output()
+        .await;
+
+    if let Err(e) = fetch_output {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": format!("Failed to fetch from origin: {}", e)
+            })),
+        )
+            .into_response();
+    }
+
+    // Rebase each sibling
+    for sibling in siblings {
+        let bead_id = match sibling.bead_id {
+            Some(id) => id,
+            None => continue,
+        };
+
+        let result = rebase_single_worktree(&sibling.path, &bead_id).await;
+        results.push(result);
+    }
+
+    Json(RebaseSiblingsResponse { results }).into_response()
+}
+
+/// Rebase a single worktree onto origin/main.
+async fn rebase_single_worktree(worktree_path: &str, bead_id: &str) -> RebaseSiblingResult {
+    // Fetch in the worktree to update refs
+    let fetch_result = Command::new("git")
+        .args(["fetch", "origin"])
+        .current_dir(worktree_path)
+        .output()
+        .await;
+
+    if let Err(e) = fetch_result {
+        return RebaseSiblingResult {
+            bead_id: bead_id.to_string(),
+            success: false,
+            error: Some(format!("Failed to fetch: {}", e)),
+        };
+    }
+
+    // Try to rebase onto origin/main
+    let rebase_output = Command::new("git")
+        .args(["rebase", "origin/main"])
+        .current_dir(worktree_path)
+        .output()
+        .await;
+
+    match rebase_output {
+        Ok(output) if output.status.success() => {
+            // Rebase succeeded, force push
+            let push_output = Command::new("git")
+                .args(["push", "--force-with-lease"])
+                .current_dir(worktree_path)
+                .output()
+                .await;
+
+            match push_output {
+                Ok(output) if output.status.success() => RebaseSiblingResult {
+                    bead_id: bead_id.to_string(),
+                    success: true,
+                    error: None,
+                },
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    RebaseSiblingResult {
+                        bead_id: bead_id.to_string(),
+                        success: false,
+                        error: Some(format!("Push failed: {}", stderr)),
+                    }
+                }
+                Err(e) => RebaseSiblingResult {
+                    bead_id: bead_id.to_string(),
+                    success: false,
+                    error: Some(format!("Push command failed: {}", e)),
+                },
+            }
+        }
+        Ok(output) => {
+            // Rebase failed (likely conflict), abort it
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
+            // Abort the rebase
+            let _ = Command::new("git")
+                .args(["rebase", "--abort"])
+                .current_dir(worktree_path)
+                .output()
+                .await;
+
+            RebaseSiblingResult {
+                bead_id: bead_id.to_string(),
+                success: false,
+                error: Some(format!("Rebase conflict: {}", stderr)),
+            }
+        }
+        Err(e) => RebaseSiblingResult {
+            bead_id: bead_id.to_string(),
+            success: false,
+            error: Some(format!("Rebase command failed: {}", e)),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
