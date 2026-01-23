@@ -2,9 +2,11 @@
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { BeadCard } from "@/components/bead-card";
 import { EpicCard } from "@/components/epic-card";
 import { cn } from "@/lib/utils";
+import { PackageOpen } from "lucide-react";
 import type { Bead, BeadStatus, Epic } from "@/types";
 /**
  * @deprecated BranchStatus is deprecated. Use WorktreeStatus from "@/types" instead.
@@ -163,8 +165,12 @@ export function KanbanColumn({
             );
           })}
           {beads.length === 0 && (
-            <div className="text-center py-8 text-zinc-500 text-sm">
-              No beads
+            <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed border-zinc-700/50 rounded-lg">
+              <PackageOpen className="size-8 text-zinc-500 mb-2" aria-hidden="true" />
+              <span className="text-zinc-500 text-sm mb-3">No beads</span>
+              <Button variant="ghost" size="sm">
+                Create task
+              </Button>
             </div>
           )}
         </div>
