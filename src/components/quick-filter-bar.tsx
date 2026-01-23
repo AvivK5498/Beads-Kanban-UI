@@ -4,6 +4,7 @@ import * as React from 'react';
 import { Search, X, ArrowUpDown, SlidersHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -131,7 +132,7 @@ export function QuickFilterBar({
           <button
             type="button"
             onClick={() => onSearchChange('')}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 -m-1.5 text-zinc-500 hover:text-zinc-300"
+            className="absolute right-0 top-1/2 -translate-y-1/2 size-11 flex items-center justify-center text-zinc-500 hover:text-zinc-300"
             aria-label="Clear search"
           >
             <X className="h-3.5 w-3.5" />
@@ -139,46 +140,39 @@ export function QuickFilterBar({
         )}
       </div>
 
-      {/* Type Filter - Segmented Control */}
-      <div
-        role="radiogroup"
-        aria-label="Filter by issue type"
-        className="flex items-center bg-zinc-800/50 rounded-md p-0.5"
+      {/* Type Filter & Today - Unified Tabs */}
+      <Tabs
+        value={typeFilter}
+        onValueChange={(value) => onTypeFilterChange(value as TypeFilter)}
+        className="h-8"
       >
-        {TYPE_OPTIONS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={typeFilter === option.value}
-            onClick={() => onTypeFilterChange(option.value)}
-            className={cn(
-              'px-3 py-1.5 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900',
-              typeFilter === option.value
-                ? 'bg-zinc-700 text-zinc-100'
-                : 'bg-transparent text-zinc-300 hover:text-zinc-200'
-            )}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+        <TabsList className="h-8 bg-zinc-800/50 p-0.5">
+          {TYPE_OPTIONS.map((option) => (
+            <TabsTrigger
+              key={option.value}
+              value={option.value}
+              className="h-7 px-3 text-sm font-medium data-[state=active]:bg-zinc-700 data-[state=active]:text-zinc-100 data-[state=inactive]:text-zinc-400 data-[state=inactive]:hover:text-zinc-200"
+            >
+              {option.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
-      {/* Today's Active Toggle */}
-      <Button
-        variant="outline"
-        size="sm"
+      {/* Today's Active Toggle - styled to match tabs */}
+      <button
+        type="button"
         onClick={() => onTodayOnlyChange(!todayOnly)}
         aria-pressed={todayOnly}
         className={cn(
-          'h-8 transition-colors',
+          'h-8 px-3 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900',
           todayOnly
-            ? 'bg-purple-500/20 text-purple-400 border-purple-500/30 hover:bg-purple-500/30'
-            : 'border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
+            ? 'bg-purple-500/20 text-purple-400'
+            : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200'
         )}
       >
         Today
-      </Button>
+      </button>
 
       {/* Spacer to push sort and filter to the right */}
       <div className="flex-1" />
