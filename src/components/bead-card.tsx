@@ -1,6 +1,13 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardHeader,
+  CardFooter,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { Bead, WorktreeStatus, PRStatus } from "@/types";
 import type { BranchStatus } from "@/lib/git";
@@ -151,7 +158,7 @@ function isBlocked(bead: Bead): boolean {
  */
 function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength).trim() + "…";
+  return text.slice(0, maxLength).trim() + "...";
 }
 
 /**
@@ -167,6 +174,13 @@ function formatBeadId(id: string): string {
   const parts = id.split("-");
   const shortId = parts[parts.length - 1];
   return `BD-${shortId.slice(0, 6)}`;
+}
+
+/**
+ * Get the display label for the bead type
+ */
+function getTypeLabel(bead: Bead): string {
+  return bead.issue_type === "epic" ? "Epic" : "Task";
 }
 
 export function BeadCard({ bead, ticketNumber, branchStatus, worktreeStatus, prStatus, isSelected = false, onSelect }: BeadCardProps) {
@@ -185,22 +199,22 @@ export function BeadCard({ bead, ticketNumber, branchStatus, worktreeStatus, prS
   const prChecksDisplay = prStatus ? getPRChecksDisplay(prStatus) : null;
 
   return (
-    <div
+    <Card
       data-bead-id={bead.id}
       role="button"
       tabIndex={0}
       aria-label={`Select bead: ${bead.title}`}
       className={cn(
-        "rounded-lg cursor-pointer p-4",
-        "bg-zinc-900/70 backdrop-blur-md",
-        "border border-zinc-800/60",
-        "shadow-sm shadow-black/20",
-        "transition-[transform,box-shadow,border-color] duration-200",
-        "hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/30",
-        "hover:border-zinc-700",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0a0a]",
-        blocked ? "border-l-4 border-l-red-500" : "border-l-4 border-l-transparent",
-        isSelected && "ring-2 ring-zinc-400 ring-offset-2 ring-offset-[#0a0a0a]"
+        // Outline variant: no shadow, subtle border
+        "cursor-pointer border-border/40 shadow-none",
+        "bg-card",
+        "transition-[transform,border-color] duration-200",
+        "hover:-translate-y-0.5 hover:border-border",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        // Blocked indicator
+        blocked && "border-l-4 border-l-red-500",
+        // Selected state
+        isSelected && "ring-2 ring-ring ring-offset-2 ring-offset-background"
       )}
       onClick={() => onSelect(bead)}
       onKeyDown={(e) => {
@@ -210,64 +224,59 @@ export function BeadCard({ bead, ticketNumber, branchStatus, worktreeStatus, prS
         }
       }}
     >
-      <div className="space-y-3">
-        {/* Header: Ticket # + ID + Priority + Blocked badge */}
+      <CardHeader className="p-3 space-y-1.5">
+        {/* Row 1: ID (left) + Type Badge (right) */}
         <div className="flex items-center justify-between">
-          <span className="text-xs font-mono text-zinc-500">
+          <CardDescription className="text-xs font-mono">
             {ticketNumber !== undefined && (
-              <span className="font-semibold text-zinc-100">#{ticketNumber}</span>
+              <span className="font-semibold text-foreground">#{ticketNumber}</span>
             )}
             {ticketNumber !== undefined && " "}
             {formatBeadId(bead.id)}
-          </span>
+          </CardDescription>
           <div className="flex items-center gap-1.5">
             {blocked && (
               <Badge
-                className="text-[10px] px-1.5 py-0 bg-red-500/20 text-red-400 border border-red-500/30"
+                variant="destructive"
+                appearance="light"
+                size="xs"
               >
                 BLOCKED
               </Badge>
             )}
             <Badge
-              className="text-[10px] px-1.5 py-0 bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+              variant="outline"
+              size="xs"
             >
-              Task
+              {getTypeLabel(bead)}
             </Badge>
           </div>
         </div>
 
-        {/* Title */}
-        <h3 className="font-semibold text-sm leading-tight text-zinc-100">
+        {/* Row 2: Title */}
+        <CardTitle className="font-semibold text-sm leading-tight">
           {truncate(bead.title, 60)}
-        </h3>
+        </CardTitle>
 
         {/* Description (truncated, muted) */}
         {bead.description && (
-          <p className="text-xs text-zinc-400 leading-relaxed">
+          <p className="text-xs text-muted-foreground leading-relaxed text-pretty">
             {truncate(bead.description, 80)}
           </p>
         )}
+      </CardHeader>
 
-        {/* Footer: comment count */}
-        {commentCount > 0 && (
-          <div className="flex items-center pt-1">
-            <span className="flex items-center gap-1 text-[10px] text-zinc-500">
-              <MessageSquare className="size-3" aria-hidden="true" />
-              {commentCount} {commentCount === 1 ? "comment" : "comments"}
-            </span>
-          </div>
-        )}
-
-        {/* Worktree and PR status box */}
-        {hasWorktree && worktreeStatus?.worktree_path && (
+      {/* Worktree and PR status box */}
+      {hasWorktree && worktreeStatus?.worktree_path && (
+        <div className="px-3 pb-3">
           <div
             className={cn(
-              "mt-2 rounded-md border p-2 space-y-1.5",
+              "rounded-md border p-2 space-y-1.5",
               getWorktreeStatusColor(worktreeStatus, prStatus)
             )}
           >
             {/* Worktree path row */}
-            <div className="flex items-center gap-1.5 text-[10px] text-zinc-400">
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
               <FolderOpen className="size-3 shrink-0" aria-hidden="true" />
               <span className="font-mono truncate">
                 {formatWorktreePath(worktreeStatus.worktree_path)}
@@ -277,7 +286,7 @@ export function BeadCard({ bead, ticketNumber, branchStatus, worktreeStatus, prS
             {/* PR status row (if PR exists) */}
             {hasPR && prStatus?.pr && prChecksDisplay && (
               <div className="flex items-center justify-between text-[10px]">
-                <div className="flex items-center gap-1.5 text-zinc-300">
+                <div className="flex items-center gap-1.5 text-foreground">
                   <GitPullRequest className="size-3 shrink-0" aria-hidden="true" />
                   <span>PR #{prStatus.pr.number}</span>
                 </div>
@@ -288,25 +297,33 @@ export function BeadCard({ bead, ticketNumber, branchStatus, worktreeStatus, prS
               </div>
             )}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Legacy branch badge (fallback when no worktree status) */}
-        {showLegacyBranch && branchStatus && (
-          <div className="pt-1">
-            <Badge
-              variant="outline"
-              className={cn(
-                "text-[10px] px-2 py-0.5",
-                getLegacyBranchBadgeColor(branchStatus)
-              )}
-            >
-              <FolderOpen className="size-3 mr-1" aria-hidden="true" />
-              {getLegacyBranchStatusLabel(branchStatus)}
-            </Badge>
-          </div>
-        )}
-      </div>
-    </div>
+      {/* Legacy branch badge (fallback when no worktree status) */}
+      {showLegacyBranch && branchStatus && (
+        <div className="px-3 pb-3">
+          <Badge
+            variant="outline"
+            size="sm"
+            className={getLegacyBranchBadgeColor(branchStatus)}
+          >
+            <FolderOpen className="size-3 mr-1" aria-hidden="true" />
+            {getLegacyBranchStatusLabel(branchStatus)}
+          </Badge>
+        </div>
+      )}
+
+      {/* Footer: comment count */}
+      {commentCount > 0 && (
+        <CardFooter className="p-3 pt-0 gap-2 text-muted-foreground">
+          <span className="flex items-center gap-1 text-[10px]">
+            <MessageSquare className="size-3" aria-hidden="true" />
+            {commentCount} {commentCount === 1 ? "comment" : "comments"}
+          </span>
+        </CardFooter>
+      )}
+    </Card>
   );
 }
 
