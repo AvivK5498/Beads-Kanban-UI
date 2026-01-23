@@ -187,6 +187,22 @@ export interface MergePRResponse {
 }
 
 /**
+ * Rebase sibling result
+ */
+export interface RebaseSiblingResult {
+  bead_id: string;
+  success: boolean;
+  error?: string;
+}
+
+/**
+ * Rebase siblings response
+ */
+export interface RebaseSiblingsResponse {
+  results: RebaseSiblingResult[];
+}
+
+/**
  * Merge method for PR merging
  */
 export type MergeMethod = 'merge' | 'squash' | 'rebase';
@@ -254,6 +270,12 @@ export const git = {
     fetchApi<MergePRResponse>('/api/git/merge-pr', {
       method: 'POST',
       body: JSON.stringify({ repo_path: repoPath, bead_id: beadId, merge_method: mergeMethod }),
+    }),
+
+  rebaseSiblings: (repoPath: string, excludeBeadId: string) =>
+    fetchApi<RebaseSiblingsResponse>('/api/git/rebase-siblings', {
+      method: 'POST',
+      body: JSON.stringify({ repo_path: repoPath, exclude_bead_id: excludeBeadId }),
     }),
 };
 

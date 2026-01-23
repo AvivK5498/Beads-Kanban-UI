@@ -33,6 +33,7 @@ import { DesignDocViewer } from "@/components/design-doc-viewer";
 import { SubtaskList } from "@/components/subtask-list";
 import { usePRStatus } from "@/hooks/use-pr-status";
 import * as api from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
 import { useState, useEffect, useCallback, useMemo } from "react";
 
 export interface BeadDetailProps {
@@ -274,6 +275,7 @@ export function BeadDetail({
   const [isCreatingPR, setIsCreatingPR] = useState(false);
   const [isMergingPR, setIsMergingPR] = useState(false);
   const [isCleaningUp, setIsCleaningUp] = useState(false);
+  const [isRebasingSiblings, setIsRebasingSiblings] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   // Fetch PR status when detail panel is open and we have a worktree
@@ -366,6 +368,39 @@ export function BeadDetail({
       } else {
         // Refresh PR status to show merged state
         await refreshPRStatus();
+
+        // Rebase sibling branches after successful merge
+        setIsRebasingSiblings(true);
+        try {
+          const rebaseResult = await api.git.rebaseSiblings(projectPath, bead.id);
+          const successCount = rebaseResult.results.filter(r => r.success).length;
+          const failedResults = rebaseResult.results.filter(r => !r.success);
+
+          if (rebaseResult.results.length === 0) {
+            // No siblings to rebase - don't show toast
+          } else if (failedResults.length === 0) {
+            toast({
+              title: "Branches rebased",
+              description: `Successfully rebased ${successCount} sibling branch${successCount !== 1 ? "es" : ""} onto main.`,
+            });
+          } else {
+            toast({
+              variant: "destructive",
+              title: "Some rebases failed",
+              description: `${successCount} succeeded, ${failedResults.length} failed: ${failedResults.map(r => r.bead_id).join(", ")}`,
+            });
+          }
+        } catch (rebaseErr) {
+          // Log but don't block - rebase is a nice-to-have
+          console.error("Failed to rebase siblings:", rebaseErr);
+          toast({
+            variant: "destructive",
+            title: "Rebase failed",
+            description: rebaseErr instanceof Error ? rebaseErr.message : "Failed to rebase sibling branches",
+          });
+        } finally {
+          setIsRebasingSiblings(false);
+        }
       }
     } catch (err) {
       const error = err instanceof Error ? err.message : "Failed to merge PR";
@@ -734,6 +769,18 @@ export function BeadDetail({
                       </Button>
                     )}
                   </div>
+
+                  {/* Rebase progress indicator */}
+                  {isRebasingSiblings && (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="flex items-center gap-2 pt-2 text-xs text-zinc-400"
+                    >
+                      <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                      <span>Rebasing other branches...</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
