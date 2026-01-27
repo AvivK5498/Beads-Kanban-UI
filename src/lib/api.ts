@@ -3,7 +3,7 @@
  * Replaces Tauri invoke() calls with HTTP fetch to backend
  */
 
-import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, PRStatus } from '@/types';
+import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, PRStatus, MemoryResponse, MemoryStats, MemoryEntry } from '@/types';
 
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3008';
 
@@ -295,6 +295,35 @@ export const fs = {
     fetchApi<{ success: boolean }>('/api/fs/open-external', {
       method: 'POST',
       body: JSON.stringify({ path, target }),
+    }),
+};
+
+/**
+ * Memory API
+ */
+export const memory = {
+  /** Fetch all memory entries and stats */
+  list: (path: string) => fetchApi<MemoryResponse>(
+    `/api/memory?path=${encodeURIComponent(path)}`
+  ),
+
+  /** Fetch memory stats only (lightweight) */
+  stats: (path: string) => fetchApi<MemoryStats>(
+    `/api/memory/stats?path=${encodeURIComponent(path)}`
+  ),
+
+  /** Update an entry's content and/or tags */
+  update: (path: string, key: string, content?: string, tags?: string[]) =>
+    fetchApi<{ success: boolean; entry: MemoryEntry }>('/api/memory', {
+      method: 'PUT',
+      body: JSON.stringify({ path, key, content, tags }),
+    }),
+
+  /** Delete or archive an entry */
+  remove: (path: string, key: string, archive: boolean) =>
+    fetchApi<{ success: boolean; archived: boolean }>('/api/memory', {
+      method: 'DELETE',
+      body: JSON.stringify({ path, key, archive }),
     }),
 };
 

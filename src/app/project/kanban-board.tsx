@@ -1,9 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState, useCallback } from "react";
+import { useMemo, useRef, useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useEffect } from "react";
 import { ArrowLeft } from "lucide-react";
 import { QuickFilterBar } from "@/components/quick-filter-bar";
 import { Button } from "@/components/ui/button";
@@ -21,6 +20,7 @@ import { BeadDetail } from "@/components/bead-detail";
 import { CommentList } from "@/components/comment-list";
 import { ActivityTimeline } from "@/components/activity-timeline";
 import { EditableProjectName } from "@/components/editable-project-name";
+import { MemoryPanel } from "@/components/memory-panel";
 import { useBeads } from "@/hooks/use-beads";
 import { useProject } from "@/hooks/use-project";
 import { useBeadFilters } from "@/hooks/use-bead-filters";
@@ -95,6 +95,9 @@ export default function KanbanBoard() {
 
   // Track whether the GitHub warning has been dismissed (session-only)
   const [githubWarningDismissed, setGithubWarningDismissed] = useState(false);
+
+  // Memory panel state
+  const [isMemoryOpen, setIsMemoryOpen] = useState(false);
 
   // Show GitHub warning if project loaded, status checked, and either no remote or not authenticated
   const showGitHubWarning = !projectLoading &&
@@ -234,6 +237,20 @@ export default function KanbanBoard() {
     setIsDetailOpen(true);
   };
 
+  /**
+   * Handle navigation from Memory panel to a bead
+   * Closes the memory panel and opens the bead detail
+   */
+  const handleMemoryNavigateToBead = useCallback((beadId: string) => {
+    setIsMemoryOpen(false);
+    // Find the bead - it may be a child task with a dot ID
+    const found = beads.find((b) => b.id === beadId);
+    if (found) {
+      setDetailBeadId(found.id);
+      setIsDetailOpen(true);
+    }
+  }, [beads]);
+
   // Redirect state while no project ID
   if (!projectId) {
     return (
@@ -278,28 +295,23 @@ export default function KanbanBoard() {
 
   return (
     <div className="dark min-h-dvh bg-[#0a0a0a] flex flex-col">
-      {/* Header */}
-      <header className="sticky top-0 z-30 flex items-center justify-center border-b border-zinc-800 bg-[#0a0a0a]/80 backdrop-blur-sm px-4 py-3">
-        {/* Left: Back button - absolute positioned */}
-        <div className="absolute left-4">
-          <Button variant="ghost" size="icon" asChild>
-            <Link href="/">
-              <ArrowLeft className="h-4 w-4" />
-              <span className="sr-only">Back to projects</span>
-            </Link>
-          </Button>
-        </div>
-
-        {/* Center: Project name */}
+      {/* Breadcrumb line */}
+      <div className="flex items-center gap-2 px-4 py-2">
+        <Button variant="ghost" size="icon" asChild>
+          <Link href="/">
+            <ArrowLeft className="h-4 w-4" />
+            <span className="sr-only">Back to projects</span>
+          </Link>
+        </Button>
         <EditableProjectName
           projectId={project.id}
           initialName={project.name}
           onNameUpdated={refetchProject}
         />
-      </header>
+      </div>
 
       {/* Quick Filter Bar */}
-      <div className="px-4 py-2 border-b border-zinc-800">
+      <div className="flex justify-center px-4 pb-3">
         <QuickFilterBar
           // Search
           search={filters.search}
@@ -323,6 +335,9 @@ export default function KanbanBoard() {
           availableOwners={availableOwners}
           onClearFilters={clearFilters}
           hasActiveFilters={hasActiveFilters}
+          // Memory
+          isMemoryOpen={isMemoryOpen}
+          onMemoryToggle={() => setIsMemoryOpen((prev) => !prev)}
         />
       </div>
 
@@ -391,6 +406,16 @@ export default function KanbanBoard() {
               .filter((b): b is Bead => !!b)}
           />
         </BeadDetail>
+      )}
+
+      {/* Memory Panel */}
+      {project?.path && (
+        <MemoryPanel
+          open={isMemoryOpen}
+          onOpenChange={setIsMemoryOpen}
+          projectPath={project.path}
+          onNavigateToBead={handleMemoryNavigateToBead}
+        />
       )}
 
       {/* GitHub Integration Warning Dialog */}

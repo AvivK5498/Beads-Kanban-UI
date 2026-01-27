@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Search, X, ArrowUpDown, SlidersHorizontal } from 'lucide-react';
+import { Search, X, ArrowUpDown, SlidersHorizontal, BrainCircuit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -56,6 +56,10 @@ interface QuickFilterBarProps {
   onClearFilters: () => void;
   /** Whether any filters are active */
   hasActiveFilters: boolean;
+  /** Whether the memory panel is open */
+  isMemoryOpen?: boolean;
+  /** Callback to toggle memory panel */
+  onMemoryToggle?: () => void;
 }
 
 const TYPE_OPTIONS: { value: TypeFilter; label: string }[] = [
@@ -100,6 +104,8 @@ export function QuickFilterBar({
   availableOwners,
   onClearFilters,
   hasActiveFilters,
+  isMemoryOpen,
+  onMemoryToggle,
 }: QuickFilterBarProps) {
   const currentSortValue = `${sortField}_${sortDirection}`;
 
@@ -114,7 +120,7 @@ export function QuickFilterBar({
     <div
       role="toolbar"
       aria-label="Quick filters"
-      className="flex items-center gap-3 bg-zinc-900/50 border border-zinc-800 rounded-lg px-3 py-2"
+      className="flex items-center gap-3 rounded-xl bg-zinc-900/80 backdrop-blur border border-zinc-800 px-3 py-2"
     >
       {/* Search Input */}
       <div className="relative">
@@ -173,6 +179,24 @@ export function QuickFilterBar({
       >
         Today
       </button>
+
+      {/* Memory Toggle */}
+      {onMemoryToggle && (
+        <button
+          type="button"
+          onClick={onMemoryToggle}
+          aria-pressed={isMemoryOpen}
+          className={cn(
+            'h-8 px-3 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900',
+            isMemoryOpen
+              ? 'bg-purple-500/20 text-purple-400'
+              : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200'
+          )}
+        >
+          <BrainCircuit className="size-4" aria-hidden="true" />
+          Memory
+        </button>
+      )}
 
       {/* Spacer to push sort and filter to the right */}
       <div className="flex-1" />
