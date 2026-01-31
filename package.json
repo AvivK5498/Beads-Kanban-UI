@@ -9,7 +9,10 @@
     "typecheck": "tsc --noEmit",
     "server:dev": "cd server && cargo run",
     "server:build": "cd server && cargo build --release",
-    "dev:full": "concurrently \"npm run dev\" \"npm run server:dev\""
+    "dev:full": "concurrently \"npm run dev\" \"npm run server:dev\"",
+    "prepare": "bash scripts/install-hooks.sh",
+    "lint:fix": "next lint --fix",
+    "precommit:full": "npm run lint && npm run typecheck && npm run build && cd server && cargo clippy -- -D warnings && cargo test"
   },
   "dependencies": {
     "@base-ui/react": "^1.1.0",

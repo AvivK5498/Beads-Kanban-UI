@@ -11,6 +11,7 @@
  */
 
 import { useMemo, useState, useCallback } from "react";
+
 import type { Bead, Epic, EpicProgress } from "@/types";
 
 /**

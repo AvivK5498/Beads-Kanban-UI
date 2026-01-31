@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+
+import { loadProjectBeads, groupBeadsByStatus } from "@/lib/beads-parser";
 import {
   getProjectsWithTags,
   createProject,
   type CreateProjectInput,
 } from "@/lib/db";
-import { loadProjectBeads, groupBeadsByStatus } from "@/lib/beads-parser";
 import type { Project, Tag, BeadCounts } from "@/types";
 
 interface UseProjectsResult {

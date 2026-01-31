@@ -1,9 +1,10 @@
 "use client";
 
+import { Check, Circle, Clock, FileCheck, GitPullRequest, GitMerge, Link2 } from "lucide-react";
+
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { Bead, BeadStatus, PRChecks } from "@/types";
-import { Check, Circle, Clock, FileCheck, GitPullRequest, GitMerge, Link2 } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * PR status for a child task (used for icon display)

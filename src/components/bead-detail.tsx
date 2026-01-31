@@ -1,18 +1,7 @@
 "use client";
 
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import type { Bead, BeadStatus, WorktreeStatus, PRStatus, PRChecks, PRFilesResponse } from "@/types";
-import { PRFilesList } from "@/components/pr-files-list";
-import type { BranchStatus } from "@/lib/git";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+
 import {
   AlertTriangle,
   ArrowLeft,
@@ -35,6 +24,12 @@ import {
   Square,
   Circle,
 } from "lucide-react";
+
+import { DesignDocViewer } from "@/components/design-doc-viewer";
+import { PRFilesList } from "@/components/pr-files-list";
+import { SubtaskList } from "@/components/subtask-list";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,18 +37,26 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { DesignDocViewer } from "@/components/design-doc-viewer";
-import { SubtaskList } from "@/components/subtask-list";
-import { Skeleton } from "@/components/ui/skeleton";
 import { usePRStatus } from "@/hooks/use-pr-status";
-import * as api from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import * as api from "@/lib/api";
+import type { BranchStatus } from "@/lib/git";
+import { cn } from "@/lib/utils";
+import type { Bead, BeadStatus, WorktreeStatus, PRStatus, PRChecks, PRFilesResponse } from "@/types";
+
 
 export interface BeadDetailProps {
   bead: Bead;

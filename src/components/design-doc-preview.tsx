@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+
+import { Loader2, FileText, AlertCircle } from "lucide-react";
+
+import { DesignDocDialog } from "@/components/design-doc-dialog";
 import { Button } from "@/components/ui/button";
 import { fetchDesignDoc, truncateMarkdownToPlainText } from "@/lib/design-doc";
-import { DesignDocDialog } from "@/components/design-doc-dialog";
-import { Loader2, FileText, AlertCircle } from "lucide-react";
 
 export interface DesignDocPreviewProps {
   /** Path to design doc (e.g., ".designs/BD-001.md") */

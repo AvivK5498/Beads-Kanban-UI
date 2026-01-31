@@ -1,11 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { addComment } from "@/lib/cli";
-import { toast } from "@/hooks/use-toast";
+
 import { Loader2, CornerDownLeft } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { toast } from "@/hooks/use-toast";
+import { addComment } from "@/lib/cli";
+import { cn } from "@/lib/utils";
 
 export interface CommentInputProps {
   /** The ID of the bead to add comments to */

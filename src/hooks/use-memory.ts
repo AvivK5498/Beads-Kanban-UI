@@ -8,8 +8,9 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import type { MemoryEntry, MemoryStats, MemoryType } from "@/types";
+
 import * as api from "@/lib/api";
+import type { MemoryEntry, MemoryStats, MemoryType } from "@/types";
 
 export interface UseMemoryResult {
   /** All memory entries from the project */

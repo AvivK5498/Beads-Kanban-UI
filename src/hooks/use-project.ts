@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+
 import { getProjectWithTags, type Project, type Tag } from "@/lib/db";
 
 export interface ProjectWithTags extends Project {

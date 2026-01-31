@@ -1,9 +1,8 @@
 import { forwardRef, useImperativeHandle, useEffect, useRef, useMemo } from 'react';
 
-import * as THREE from 'three';
-
-import { Canvas, useFrame } from '@react-three/fiber';
 import { PerspectiveCamera } from '@react-three/drei';
+import { Canvas, useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
 import { degToRad } from 'three/src/math/MathUtils.js';
 
 import './Beams.css';

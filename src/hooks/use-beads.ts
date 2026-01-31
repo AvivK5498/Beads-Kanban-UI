@@ -8,13 +8,14 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { Bead, BeadStatus } from "@/types";
+
+import { useFileWatcher } from "@/hooks/use-file-watcher";
 import {
   loadProjectBeads,
   groupBeadsByStatus,
   assignTicketNumbers,
 } from "@/lib/beads-parser";
-import { useFileWatcher } from "@/hooks/use-file-watcher";
+import type { Bead, BeadStatus } from "@/types";
 
 /**
  * Result type for the useBeads hook

@@ -5,8 +5,9 @@
  * through the backend API.
  */
 
-import * as api from './api';
 import type { BeadStatus } from "@/types";
+
+import * as api from './api';
 
 /**
  * Result from executing a CLI command

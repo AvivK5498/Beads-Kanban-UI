@@ -1,13 +1,16 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import * as api from "@/lib/api";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+
 import { Folder, FolderOpen, ChevronRight, Home } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import * as api from "@/lib/api";
 import type { FsEntry } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
 
 interface FolderBrowserProps {
   currentPath: string;

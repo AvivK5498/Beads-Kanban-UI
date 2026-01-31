@@ -1,6 +1,9 @@
-import { cva, type VariantProps } from "class-variance-authority";
 import Image from "next/image";
+
+import { cva, type VariantProps } from "class-variance-authority";
+
 import { cn } from "@/lib/utils";
+
 import styles from "./roiui-card.module.css";
 
 const cardVariants = cva(styles.card, {

@@ -1,13 +1,14 @@
 "use client";
 
 import * as React from "react";
+
 import { Plus, Check, X } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+
 import { ColorPicker } from "@/components/color-picker";
-import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { Tag } from "@/lib/db";
 import {
   getTags,
@@ -15,6 +16,7 @@ import {
   addTagToProject,
   removeTagFromProject,
 } from "@/lib/db";
+import { cn } from "@/lib/utils";
 
 interface TagPickerProps {
   projectId: string;

@@ -1,17 +1,19 @@
 "use client";
 
 import { useState, useEffect } from "react";
+
 import Link from "next/link";
-import { getTags, createTag, deleteTag, type Tag } from "@/lib/db";
+
 import { ColorPicker } from "@/components/color-picker";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   usePRSettings,
   MIN_POLLING_INTERVAL,
   MAX_POLLING_INTERVAL,
 } from "@/hooks/use-pr-settings";
 import type { MergeMethod } from "@/lib/api";
+import { getTags, createTag, deleteTag, type Tag } from "@/lib/db";
 
 /** Merge method options for the radio group */
 const MERGE_METHOD_OPTIONS: { value: MergeMethod; label: string }[] = [

@@ -5,9 +5,10 @@
  * common operations.
  */
 
-import * as api from './api';
 import type { Bead, BeadStatus, Epic, KnownRawStatus, StatusBadgeInfo } from "@/types";
 import { STATUS_MAP } from "@/types";
+
+import * as api from './api';
 
 /**
  * Check if a raw status string is a known status in the STATUS_MAP

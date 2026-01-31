@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, RefObject } from "react";
+
 import type { Bead, BeadStatus } from "@/types";
 
 /**

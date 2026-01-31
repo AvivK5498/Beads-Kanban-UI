@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+
+import { FileText, Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
-import { FileText, Loader2 } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   MorphingDialog,
   MorphingDialogTrigger,
@@ -17,6 +17,8 @@ import {
   MorphingDialogTitle,
   MorphingDialogDescription,
 } from "@/components/ui/morphing-dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 import "highlight.js/styles/github-dark.css";
 
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3008';

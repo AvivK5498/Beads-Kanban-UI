@@ -9,6 +9,8 @@ import React, {
   useRef,
   useState,
 } from 'react';
+
+import { XIcon } from 'lucide-react';
 import {
   motion,
   AnimatePresence,
@@ -18,9 +20,9 @@ import {
 } from 'motion/react';
 import { createPortal } from 'react-dom';
 import { RemoveScroll } from 'react-remove-scroll';
-import { cn } from '@/lib/utils';
-import { XIcon } from 'lucide-react';
+
 import useClickOutside from '@/hooks/useClickOutside';
+import { cn } from '@/lib/utils';
 
 export type MorphingDialogContextType = {
   isOpen: boolean;

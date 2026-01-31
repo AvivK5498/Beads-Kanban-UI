@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { cn } from '@/lib/utils';
+
 import {
   defaultDropAnimation,
   defaultDropAnimationSideEffects,
@@ -29,6 +29,8 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Slot } from '@radix-ui/react-slot';
+
+import { cn } from '@/lib/utils';
 
 interface KanbanContextProps<T> {
   columns: Record<string, T[]>;

@@ -1,18 +1,20 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+
+import { CheckCircle2, ChevronDown, ChevronRight, Layers, Loader2, MessageSquare } from "lucide-react";
+
+import { DependencyBadge } from "@/components/dependency-badge";
+import { DesignDocPreview } from "@/components/design-doc-preview";
+import { SubtaskList, ChildPRStatus } from "@/components/subtask-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { cn } from "@/lib/utils";
-import { closeBead } from "@/lib/cli";
-import type { Bead, Epic, EpicProgress } from "@/types";
-import { CheckCircle2, ChevronDown, ChevronRight, Layers, Loader2, MessageSquare } from "lucide-react";
-import { SubtaskList, ChildPRStatus } from "@/components/subtask-list";
-import { DependencyBadge } from "@/components/dependency-badge";
-import { DesignDocPreview } from "@/components/design-doc-preview";
-import { computeEpicProgress } from "@/lib/epic-parser";
 import * as api from "@/lib/api";
+import { closeBead } from "@/lib/cli";
+import { computeEpicProgress } from "@/lib/epic-parser";
+import { cn } from "@/lib/utils";
+import type { Bead, Epic, EpicProgress } from "@/types";
 
 export interface EpicCardProps {
   /** Epic bead with children */

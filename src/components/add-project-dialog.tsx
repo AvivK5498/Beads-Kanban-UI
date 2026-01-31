@@ -1,6 +1,10 @@
 "use client";
 
 import { useState } from "react";
+
+import { Folder, Loader2 } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -9,12 +13,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { CreateProjectInput } from "@/lib/db";
-import { Folder, Loader2 } from "lucide-react";
+
 
 interface AddProjectDialogProps {
   open: boolean;

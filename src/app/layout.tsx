@@ -1,7 +1,9 @@
-import type { Metadata } from 'next';
 import { Space_Grotesk, Plus_Jakarta_Sans } from 'next/font/google';
-import { Toaster } from '@/components/ui/toaster';
+
 import { DevTools } from '@/components/dev-tools';
+import { Toaster } from '@/components/ui/toaster';
+
+import type { Metadata } from 'next';
 import './globals.css';
 
 const spaceGrotesk = Space_Grotesk({

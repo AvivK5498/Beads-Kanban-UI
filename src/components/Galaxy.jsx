@@ -1,5 +1,6 @@
-import { Renderer, Program, Mesh, Color, Triangle } from 'ogl';
 import { useEffect, useRef } from 'react';
+
+import { Renderer, Program, Mesh, Color, Triangle } from 'ogl';
 import './Galaxy.css';
 
 const vertexShader = `

@@ -1,14 +1,9 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+
+import { Folder, Check, Loader2 } from "lucide-react";
+
 import {
   AlertDialog,
   AlertDialogClose,
@@ -18,14 +13,22 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { Folder, Check, Loader2 } from "lucide-react";
+
 
 interface ScannedProject {
   name: string;

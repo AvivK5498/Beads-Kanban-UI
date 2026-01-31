@@ -1,10 +1,10 @@
 'use client';
 
 import * as React from 'react';
+
 import { Search, X, ArrowUpDown, SlidersHorizontal, BrainCircuit, AlertTriangle } from 'lucide-react';
+
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -14,6 +14,8 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Tooltip,
   TooltipTrigger,

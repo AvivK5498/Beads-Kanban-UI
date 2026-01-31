@@ -1,5 +1,7 @@
 "use client";
 
+import { FolderOpen, GitPullRequest, Link2, MessageSquare, Check, X, Clock } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -8,10 +10,9 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import type { BranchStatus } from "@/lib/git";
 import { cn } from "@/lib/utils";
 import type { Bead, WorktreeStatus, PRStatus, StatusBadgeInfo } from "@/types";
-import type { BranchStatus } from "@/lib/git";
-import { FolderOpen, GitPullRequest, Link2, MessageSquare, Check, X, Clock } from "lucide-react";
 
 export interface BeadCardProps {
   bead: Bead;

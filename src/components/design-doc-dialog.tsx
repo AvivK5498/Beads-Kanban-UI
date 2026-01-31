@@ -1,7 +1,9 @@
 "use client";
 
+import { FileText } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
+
 import {
   Dialog,
   DialogContent,
@@ -10,7 +12,6 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { designDocProseClasses } from "@/lib/design-doc";
-import { FileText } from "lucide-react";
 import "highlight.js/styles/github-dark.css";
 
 export interface DesignDocDialogProps {

@@ -8,6 +8,7 @@
  */
 
 import { useState, useMemo, useCallback, useEffect } from "react";
+
 import type { Bead, BeadStatus } from "@/types";
 
 /**

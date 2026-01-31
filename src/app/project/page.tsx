@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+
 import KanbanBoard from './kanban-board';
 
 function LoadingFallback() {

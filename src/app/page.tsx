@@ -1,23 +1,26 @@
 "use client";
 
 import { useMemo, useState } from "react";
+
 import Link from "next/link";
+
 import { Plus, ChevronDown, FolderPlus, FolderSearch, Github, Settings, Search, X } from "lucide-react";
-import { ProjectCard } from "@/components/project-card";
+
 import { AddProjectDialog } from "@/components/add-project-dialog";
+import { ProjectCard } from "@/components/project-card";
 import { ScanDirectoryDialog } from "@/components/scan-directory-dialog";
-import { useProjects } from "@/hooks/use-projects";
-import { useToast } from "@/hooks/use-toast";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Button, ButtonArrow } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button, ButtonArrow } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useProjects } from "@/hooks/use-projects";
+import { useToast } from "@/hooks/use-toast";
 
 export default function ProjectsPage() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);

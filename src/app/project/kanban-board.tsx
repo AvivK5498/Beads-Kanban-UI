@@ -1,11 +1,19 @@
 "use client";
 
 import { useMemo, useRef, useState, useCallback, useEffect } from "react";
+
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
+
 import { ArrowLeft } from "lucide-react";
+
+import { ActivityTimeline } from "@/components/activity-timeline";
+import { BeadDetail } from "@/components/bead-detail";
+import { CommentList } from "@/components/comment-list";
+import { EditableProjectName } from "@/components/editable-project-name";
+import { KanbanColumn } from "@/components/kanban-column";
+import { MemoryPanel } from "@/components/memory-panel";
 import { QuickFilterBar } from "@/components/quick-filter-bar";
-import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -15,24 +23,19 @@ import {
   AlertDialogTitle,
   AlertDialogClose,
 } from "@/components/ui/alert-dialog";
-import { KanbanColumn } from "@/components/kanban-column";
-import { BeadDetail } from "@/components/bead-detail";
-import { CommentList } from "@/components/comment-list";
-import { ActivityTimeline } from "@/components/activity-timeline";
-import { EditableProjectName } from "@/components/editable-project-name";
-import { MemoryPanel } from "@/components/memory-panel";
-import { useBeads } from "@/hooks/use-beads";
-import { useProject } from "@/hooks/use-project";
+import { Button } from "@/components/ui/button";
 import { useBeadFilters } from "@/hooks/use-bead-filters";
-import { useGitHubStatus } from "@/hooks/use-github-status";
-import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser";
+import { useBeads } from "@/hooks/use-beads";
 /**
  * @deprecated useBranchStatuses is deprecated. Use useWorktreeStatuses instead.
  * TODO: Migrate to useWorktreeStatuses for the worktree-based workflow.
  */
 import { useBranchStatuses } from "@/hooks/use-branch-statuses";
-import { useWorktreeStatuses } from "@/hooks/use-worktree-statuses";
+import { useGitHubStatus } from "@/hooks/use-github-status";
 import { useKeyboardNavigation } from "@/hooks/use-keyboard-navigation";
+import { useProject } from "@/hooks/use-project";
+import { useWorktreeStatuses } from "@/hooks/use-worktree-statuses";
+import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser";
 import type { Bead, BeadStatus } from "@/types";
 
 /**

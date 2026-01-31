@@ -5,8 +5,9 @@
  * and their relationships.
  */
 
-import * as api from './api';
 import type { Project, Tag } from '@/types';
+
+import * as api from './api';
 
 // ===== Input Types =====
 

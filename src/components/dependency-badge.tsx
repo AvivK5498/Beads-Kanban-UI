@@ -1,9 +1,10 @@
 "use client";
 
+import { AlertCircle, Lock } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { AlertCircle, Lock } from "lucide-react";
 
 export interface DependencyBadgeProps {
   /** Bead IDs that this task depends on (blockers) */
