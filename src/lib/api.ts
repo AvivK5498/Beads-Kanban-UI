@@ -125,12 +125,6 @@ export const beads = {
   read: (path: string) => fetchApi<{ beads: Bead[] }>(
     `/api/beads?path=${encodeURIComponent(path)}`
   ),
-
-  addComment: (path: string, beadId: string, text: string, author: string) =>
-    fetchApi<Bead>('/api/beads/comment', {
-      method: 'POST',
-      body: JSON.stringify({ path, bead_id: beadId, text, author }),
-    }),
 };
 
 /**

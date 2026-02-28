@@ -6,7 +6,7 @@ import { formatDistanceToNow } from "date-fns";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { beads as beadsApi } from "@/lib/api";
+import { addComment } from "@/lib/cli";
 import { cn } from "@/lib/utils";
 import type { Comment } from "@/types";
 
@@ -75,9 +75,7 @@ export function CommentList({
     setError(null);
 
     try {
-      // Get author from localStorage or use default
-      const author = localStorage.getItem("beads-author") || "user";
-      await beadsApi.addComment(projectPath, beadId, newComment.trim(), author);
+      await addComment(beadId, newComment.trim(), projectPath);
       setNewComment("");
       onCommentAdded?.();
     } catch (err) {

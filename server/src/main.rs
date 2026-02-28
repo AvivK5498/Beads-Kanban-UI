@@ -111,7 +111,6 @@ async fn main() {
         .route("/api/health", get(routes::health))
         .nest("/api", routes::project_routes().with_state(database))
         .route("/api/beads", get(routes::beads::read_beads))
-        .route("/api/beads/comment", post(routes::beads::add_comment))
         .route("/api/fs/list", get(routes::fs::list_directory))
         .route("/api/fs/exists", get(routes::fs::path_exists))
         .route("/api/fs/read", get(routes::fs::read_file))
