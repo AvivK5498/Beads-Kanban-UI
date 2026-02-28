@@ -2,8 +2,9 @@
 
 import { useState, useCallback } from "react";
 
-import { Folder, Check, Loader2 } from "lucide-react";
+import { Folder, Check, Loader2, FolderSearch } from "lucide-react";
 
+import { FolderBrowser } from "@/components/folder-browser";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -55,6 +56,8 @@ export function ScanDirectoryDialog({
   const [scannedProjects, setScannedProjects] = useState<ScannedProject[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
+  const [browserPath, setBrowserPath] = useState("");
   const { toast } = useToast();
 
   const resetState = useCallback(() => {
@@ -64,6 +67,8 @@ export function ScanDirectoryDialog({
     setIsScanning(false);
     setIsAdding(false);
     setShowConfirmDialog(false);
+    setBrowsing(false);
+    setBrowserPath("");
   }, []);
 
   const handleOpenChange = useCallback(
@@ -85,14 +90,15 @@ export function ScanDirectoryDialog({
       const dirs = entries.filter((e) => e.isDirectory);
 
       // Check each subdirectory for .beads folder in parallel
+      // Some system dirs may return 403 — ignore those
       const projectResults = await Promise.all(
         dirs.map(async (dir) => {
-          const result = await api.fs.exists(`${dir.path}/.beads`);
-          return {
-            name: dir.name,
-            path: dir.path,
-            hasBeads: result.exists,
-          };
+          try {
+            const result = await api.fs.exists(`${dir.path}/.beads`);
+            return { name: dir.name, path: dir.path, hasBeads: result.exists };
+          } catch {
+            return { name: dir.name, path: dir.path, hasBeads: false };
+          }
         })
       );
 
@@ -127,6 +133,11 @@ export function ScanDirectoryDialog({
       setIsScanning(false);
     }
   }, [selectedDirectory, toast]);
+
+  const handleBrowseSelect = useCallback((path: string) => {
+    setSelectedDirectory(path);
+    setBrowsing(false);
+  }, []);
 
   const toggleProject = useCallback((path: string) => {
     setScannedProjects((prev) =>
@@ -175,7 +186,7 @@ export function ScanDirectoryDialog({
   return (
     <>
       <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className={browsing ? "sm:max-w-lg" : "sm:max-w-lg"}>
           <DialogHeader>
             <DialogTitle>Scan for Projects</DialogTitle>
             <DialogDescription>
@@ -187,41 +198,76 @@ export function ScanDirectoryDialog({
 
           {step === "select" && (
             <div className="flex flex-col gap-4 py-4">
-              <div className="space-y-2">
-                <label htmlFor="scan-path" className="text-sm font-medium text-zinc-300">
-                  Parent Directory
-                </label>
-                <div className="relative">
-                  <Folder className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden="true" />
-                  <Input
-                    id="scan-path"
-                    value={selectedDirectory}
-                    onChange={(e) => setSelectedDirectory(e.target.value)}
-                    placeholder="/path/to/parent/directory"
-                    className="pl-10"
-                    autoFocus
+              {browsing ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-zinc-300">
+                      Browse Folders
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setBrowsing(false)}
+                      className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                    >
+                      Type path instead
+                    </button>
+                  </div>
+                  <FolderBrowser
+                    currentPath={browserPath}
+                    onPathChange={setBrowserPath}
+                    onSelectPath={(path) => handleBrowseSelect(path)}
                   />
                 </div>
-                <p className="text-xs text-zinc-500">
-                  Enter a directory path to scan its subdirectories for beads projects.
-                </p>
-              </div>
+              ) : (
+                <div className="space-y-2">
+                  <label htmlFor="scan-path" className="text-sm font-medium text-zinc-300">
+                    Parent Directory
+                  </label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Folder className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden="true" />
+                      <Input
+                        id="scan-path"
+                        value={selectedDirectory}
+                        onChange={(e) => setSelectedDirectory(e.target.value)}
+                        placeholder="/path/to/parent/directory"
+                        className="pl-10"
+                        autoFocus
+                      />
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="md"
+                      onClick={() => setBrowsing(true)}
+                      title="Browse folders"
+                    >
+                      <FolderSearch className="size-4" />
+                      Browse
+                    </Button>
+                  </div>
+                  <p className="text-xs text-zinc-500">
+                    Enter a directory path to scan its subdirectories for beads projects.
+                  </p>
+                </div>
+              )}
 
-              <DialogFooter>
-                <Button
-                  onClick={scanDirectory}
-                  disabled={!selectedDirectory.trim() || isScanning}
-                >
-                  {isScanning ? (
-                    <>
-                      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                      Scanning...
-                    </>
-                  ) : (
-                    "Scan for Projects"
-                  )}
-                </Button>
-              </DialogFooter>
+              {!browsing && (
+                <DialogFooter>
+                  <Button
+                    onClick={scanDirectory}
+                    disabled={!selectedDirectory.trim() || isScanning}
+                  >
+                    {isScanning ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                        Scanning...
+                      </>
+                    ) : (
+                      "Scan for Projects"
+                    )}
+                  </Button>
+                </DialogFooter>
+              )}
             </div>
           )}
 

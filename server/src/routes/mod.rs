@@ -34,27 +34,20 @@ pub async fn health() -> impl IntoResponse {
     Json(HealthResponse { status: "ok" })
 }
 
-/// Validates that a path is within allowed directories (user home).
+/// Validates that a path is safe to access.
 ///
 /// # Security
 ///
 /// This function ensures that:
-/// - The path is within the user's home directory
-/// - No path traversal attacks are possible
+/// - The path can be canonicalized (no path traversal attacks)
+/// - On Windows: the path is on a local drive (not a UNC network path)
+/// - On Unix: the path is within the user's home directory
 ///
 /// # Returns
 ///
 /// - `Ok(())` if the path is valid and within allowed directories
 /// - `Err(String)` with an error message if validation fails
 pub fn validate_path_security(path: &Path) -> Result<(), String> {
-    // Get the user's home directory
-    let user_dirs = match UserDirs::new() {
-        Some(u) => u,
-        None => return Err("Could not determine user directories".to_string()),
-    };
-
-    let home_dir = user_dirs.home_dir();
-
     // Canonicalize paths for comparison (resolves symlinks and ..)
     let canonical_path = match path.canonicalize() {
         Ok(p) => p,
@@ -71,14 +64,39 @@ pub fn validate_path_security(path: &Path) -> Result<(), String> {
         }
     };
 
-    let canonical_home = match home_dir.canonicalize() {
-        Ok(h) => h,
-        Err(_) => return Err("Could not canonicalize home directory".to_string()),
-    };
+    // On Windows, allow any local drive but block UNC network paths.
+    // On Unix, restrict to the user's home directory.
+    if cfg!(windows) {
+        let path_str = canonical_path.to_string_lossy();
+        // Windows canonicalize produces \\?\C:\... (extended-length path prefix).
+        // Strip that prefix before checking for actual UNC paths.
+        let normalized = path_str
+            .strip_prefix("\\\\?\\")
+            .unwrap_or(&path_str);
+        // Real UNC paths: \\server\share or \\?\UNC\server\share
+        if normalized.starts_with("\\\\") || normalized.starts_with("UNC\\") {
+            return Err("Access denied: network (UNC) paths are not allowed".to_string());
+        }
+        // Must start with a drive letter like C:\
+        if !normalized.starts_with(|c: char| c.is_ascii_alphabetic()) {
+            return Err("Access denied: invalid path".to_string());
+        }
+    } else {
+        let user_dirs = match UserDirs::new() {
+            Some(u) => u,
+            None => return Err("Could not determine user directories".to_string()),
+        };
 
-    // Check if the path starts with the home directory
-    if !canonical_path.starts_with(&canonical_home) {
-        return Err("Access denied: path must be within home directory".to_string());
+        let home_dir = user_dirs.home_dir();
+
+        let canonical_home = match home_dir.canonicalize() {
+            Ok(h) => h,
+            Err(_) => return Err("Could not canonicalize home directory".to_string()),
+        };
+
+        if !canonical_path.starts_with(&canonical_home) {
+            return Err("Access denied: path must be within home directory".to_string());
+        }
     }
 
     Ok(())
@@ -101,10 +119,19 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_outside_home() {
-        let result = validate_path_security(&PathBuf::from("/etc/passwd"));
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err();
-        assert!(err_msg.contains("denied") || err_msg.contains("Invalid"));
+    fn test_reject_unsafe_paths() {
+        if cfg!(windows) {
+            // UNC paths should be rejected
+            let result = validate_path_security(&PathBuf::from("\\\\server\\share\\file"));
+            assert!(result.is_err());
+            let err_msg = result.unwrap_err();
+            assert!(err_msg.contains("denied") || err_msg.contains("Invalid") || err_msg.contains("network"));
+        } else {
+            // Unix: paths outside home should be rejected
+            let result = validate_path_security(&PathBuf::from("/etc/passwd"));
+            assert!(result.is_err());
+            let err_msg = result.unwrap_err();
+            assert!(err_msg.contains("denied") || err_msg.contains("Invalid"));
+        }
     }
 }

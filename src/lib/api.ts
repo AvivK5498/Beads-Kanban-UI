@@ -70,7 +70,12 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    throw new Error(`API error: ${res.status} ${res.statusText}`);
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      if (body?.error) detail = body.error;
+    } catch { /* no JSON body */ }
+    throw new Error(`API error: ${res.status} ${detail}`);
   }
   return res.json();
 }
@@ -294,6 +299,8 @@ export const fs = {
   exists: (path: string) => fetchApi<{ exists: boolean }>(
     `/api/fs/exists?path=${encodeURIComponent(path)}`
   ),
+
+  roots: () => fetchApi<{ home: string; roots: string[] }>('/api/fs/roots'),
 
   openExternal: (path: string, target: 'vscode' | 'cursor' | 'finder') =>
     fetchApi<{ success: boolean }>('/api/fs/open-external', {

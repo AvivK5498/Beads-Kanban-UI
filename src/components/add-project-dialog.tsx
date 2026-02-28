@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 
-import { Folder, Loader2 } from "lucide-react";
+import { Folder, Loader2, FolderSearch } from "lucide-react";
 
+import { FolderBrowser } from "@/components/folder-browser";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -36,6 +37,8 @@ export function AddProjectDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pathError, setPathError] = useState<string | null>(null);
   const [showNameInput, setShowNameInput] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
+  const [browserPath, setBrowserPath] = useState("");
   const { toast } = useToast();
 
   const resetState = () => {
@@ -43,6 +46,8 @@ export function AddProjectDialog({
     setProjectName("");
     setPathError(null);
     setShowNameInput(false);
+    setBrowsing(false);
+    setBrowserPath("");
     setIsValidating(false);
   };
 
@@ -53,8 +58,9 @@ export function AddProjectDialog({
     onOpenChange(open);
   };
 
-  const validateAndProceed = async () => {
-    if (!projectPath.trim()) {
+  const validateAndProceed = async (pathToValidate?: string) => {
+    const path = pathToValidate || projectPath;
+    if (!path.trim()) {
       setPathError("Please enter a project path.");
       return;
     }
@@ -63,7 +69,7 @@ export function AddProjectDialog({
     setPathError(null);
 
     try {
-      const cleanPath = projectPath.trim().replace(/\/+$/, "");
+      const cleanPath = path.trim().replace(/[/\\]+$/, "");
       const result = await api.fs.exists(`${cleanPath}/.beads`);
 
       if (!result.exists) {
@@ -83,11 +89,25 @@ export function AddProjectDialog({
       setProjectPath(cleanPath);
       setProjectName(defaultName);
       setShowNameInput(true);
+      setBrowsing(false);
     } catch (err) {
       console.error("Error validating path:", err);
-      setPathError("Could not access the specified path. Please check it exists.");
+      const message = err instanceof Error ? err.message : String(err);
+      setPathError(message.includes("API error")
+        ? "Could not access the specified path. Please check it exists and is on a local drive."
+        : "Could not access the specified path. Please check it exists.");
     } finally {
       setIsValidating(false);
+    }
+  };
+
+  const handleBrowseSelect = (path: string, hasBeads: boolean) => {
+    setProjectPath(path);
+    setBrowsing(false);
+    if (hasBeads) {
+      validateAndProceed(path);
+    } else {
+      setPathError("No .beads folder found. Run `bd init` in your project first.");
     }
   };
 
@@ -127,7 +147,7 @@ export function AddProjectDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={browsing ? "sm:max-w-lg" : "sm:max-w-md"}>
         <DialogHeader>
           <DialogTitle>Add Project</DialogTitle>
           <DialogDescription>
@@ -139,46 +159,81 @@ export function AddProjectDialog({
 
         {!showNameInput ? (
           <div className="flex flex-col gap-4 py-4">
-            <div className="space-y-2">
-              <label htmlFor="path" className="text-sm font-medium text-zinc-300">
-                Project Path
-              </label>
-              <div className="relative">
-                <Folder className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden="true" />
-                <Input
-                  id="path"
-                  value={projectPath}
-                  onChange={(e) => {
-                    setProjectPath(e.target.value);
-                    setPathError(null);
-                  }}
-                  placeholder="/path/to/your/project"
-                  className="pl-10"
-                  autoFocus
+            {browsing ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-zinc-300">
+                    Browse Folders
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setBrowsing(false)}
+                    className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                  >
+                    Type path instead
+                  </button>
+                </div>
+                <FolderBrowser
+                  currentPath={browserPath}
+                  onPathChange={setBrowserPath}
+                  onSelectPath={handleBrowseSelect}
                 />
               </div>
-              {pathError && (
-                <p className="text-sm text-red-400">{pathError}</p>
-              )}
-              <p className="text-xs text-zinc-500">
-                Enter the full path to your project folder (must contain a .beads folder).
-              </p>
-            </div>
-            <DialogFooter>
-              <Button
-                onClick={validateAndProceed}
-                disabled={!projectPath.trim() || isValidating}
-              >
-                {isValidating ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                    Validating...
-                  </>
-                ) : (
-                  "Continue"
+            ) : (
+              <div className="space-y-2">
+                <label htmlFor="path" className="text-sm font-medium text-zinc-300">
+                  Project Path
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Folder className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden="true" />
+                    <Input
+                      id="path"
+                      value={projectPath}
+                      onChange={(e) => {
+                        setProjectPath(e.target.value);
+                        setPathError(null);
+                      }}
+                      placeholder="/path/to/your/project"
+                      className="pl-10"
+                      autoFocus
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="md"
+                    onClick={() => setBrowsing(true)}
+                    title="Browse folders"
+                  >
+                    <FolderSearch className="size-4" />
+                    Browse
+                  </Button>
+                </div>
+                {pathError && (
+                  <p className="text-sm text-red-400">{pathError}</p>
                 )}
-              </Button>
-            </DialogFooter>
+                <p className="text-xs text-zinc-500">
+                  Enter the full path to your project folder (must contain a .beads folder).
+                </p>
+              </div>
+            )}
+            {!browsing && (
+              <DialogFooter>
+                <Button
+                  onClick={() => validateAndProceed()}
+                  disabled={!projectPath.trim() || isValidating}
+                >
+                  {isValidating ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                      Validating...
+                    </>
+                  ) : (
+                    "Continue"
+                  )}
+                </Button>
+              </DialogFooter>
+            )}
           </div>
         ) : (
           <form onSubmit={handleSubmit}>

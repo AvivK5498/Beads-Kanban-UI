@@ -23,6 +23,56 @@ interface DirectoryEntry extends FsEntry {
   hasBeads: boolean;
 }
 
+/** Check if a path looks like a Windows drive root (e.g. "C:\") */
+function isDriveRoot(p: string): boolean {
+  return /^[A-Za-z]:[/\\]?$/.test(p);
+}
+
+/** Get the parent of a path, handling both Unix and Windows styles */
+function getParentPath(p: string): string | null {
+  // Unix root
+  if (p === "/") return null;
+  // Windows drive root  e.g. "C:\"
+  if (isDriveRoot(p)) return null;
+  // Strip trailing separator
+  const trimmed = p.replace(/[/\\]+$/, "");
+  const lastSep = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  if (lastSep <= 0 && trimmed.startsWith("/")) return "/";
+  if (lastSep < 0) return null;
+  const parent = trimmed.substring(0, lastSep);
+  // If parent is like "C:", return "C:\"
+  if (/^[A-Za-z]:$/.test(parent)) return parent + "\\";
+  return parent || "/";
+}
+
+/** Split a path into breadcrumb segments */
+function pathToSegments(p: string): { label: string; path: string }[] {
+  const segments: { label: string; path: string }[] = [];
+  // Handle Windows drive letter
+  const driveMatch = p.match(/^([A-Za-z]):[/\\]/);
+  if (driveMatch) {
+    const driveRoot = driveMatch[1].toUpperCase() + ":\\";
+    segments.push({ label: driveRoot, path: driveRoot });
+    const rest = p.substring(driveRoot.length);
+    const parts = rest.split(/[/\\]/).filter(Boolean);
+    let current = driveRoot;
+    for (const part of parts) {
+      current = current.replace(/[/\\]$/, "") + "\\" + part;
+      segments.push({ label: part, path: current });
+    }
+  } else {
+    // Unix-style
+    const parts = p.split("/").filter(Boolean);
+    segments.push({ label: "/", path: "/" });
+    let current = "";
+    for (const part of parts) {
+      current += "/" + part;
+      segments.push({ label: part, path: current });
+    }
+  }
+  return segments;
+}
+
 export function FolderBrowser({
   currentPath,
   onPathChange,
@@ -34,7 +84,21 @@ export function FolderBrowser({
   const [error, setError] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
   const [currentPathHasBeads, setCurrentPathHasBeads] = useState(false);
+  const [homeDir, setHomeDir] = useState<string>("");
+  const [driveRoots, setDriveRoots] = useState<string[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
+
+  // Load home dir and roots on mount
+  useEffect(() => {
+    api.fs.roots().then(({ home, roots }) => {
+      setHomeDir(home);
+      setDriveRoots(roots);
+      // If no currentPath yet, start at home
+      if (!currentPath) {
+        onPathChange(home);
+      }
+    }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load directories when path changes
   useEffect(() => {
@@ -46,24 +110,27 @@ export function FolderBrowser({
       setSelectedIndex(-1);
 
       try {
+        const cleanPath = currentPath.replace(/[/\\]+$/, "") || currentPath;
         // Fetch directory contents and check if current path has beads in parallel
         const [listResult, currentBeadsResult] = await Promise.all([
           api.fs.list(currentPath),
-          api.fs.exists(`${currentPath.replace(/\/+$/, "")}/.beads`),
+          api.fs.exists(`${cleanPath}/.beads`),
         ]);
 
         // Filter to only directories
         const dirs = listResult.entries.filter((entry) => entry.isDirectory);
 
         // Check which directories have .beads folders in parallel
+        // Some system dirs (e.g. "System Volume Information") may return 403 — ignore those
         const dirsWithBeadsStatus = await Promise.all(
           dirs.map(async (dir) => {
-            const beadsPath = `${dir.path}/.beads`;
-            const result = await api.fs.exists(beadsPath);
-            return {
-              ...dir,
-              hasBeads: result.exists,
-            };
+            try {
+              const beadsPath = `${dir.path}/.beads`;
+              const result = await api.fs.exists(beadsPath);
+              return { ...dir, hasBeads: result.exists };
+            } catch {
+              return { ...dir, hasBeads: false };
+            }
           })
         );
 
@@ -96,21 +163,15 @@ export function FolderBrowser({
   );
 
   const navigateUp = useCallback(() => {
-    const parentPath = currentPath.replace(/\/[^/]+\/?$/, "") || "/";
-    onPathChange(parentPath);
+    const parent = getParentPath(currentPath);
+    if (parent) onPathChange(parent);
   }, [currentPath, onPathChange]);
 
   const navigateToHome = useCallback(() => {
-    // Get home directory - on macOS/Linux it's typically /Users/username or /home/username
-    const homePath =
-      typeof window !== "undefined"
-        ? "/Users" // Start at /Users on macOS for navigation
-        : "/";
-    onPathChange(homePath);
-  }, [onPathChange]);
+    if (homeDir) onPathChange(homeDir);
+  }, [homeDir, onPathChange]);
 
-  // Build breadcrumb segments from current path
-  const pathSegments = currentPath.split("/").filter(Boolean);
+  const breadcrumbs = currentPath ? pathToSegments(currentPath) : [];
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -134,7 +195,7 @@ export function FolderBrowser({
           }
           break;
         case "Backspace":
-          if (currentPath !== "/") {
+          if (getParentPath(currentPath)) {
             e.preventDefault();
             navigateUp();
           }
@@ -157,7 +218,7 @@ export function FolderBrowser({
       aria-label="Folder browser"
     >
       {/* Breadcrumb navigation */}
-      <div className="flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800/50 px-2 py-1.5 text-sm">
+      <div className="flex items-center gap-1 overflow-x-auto rounded-md border border-zinc-700 bg-zinc-800/50 px-2 py-1.5 text-sm">
         <Button
           variant="ghost"
           size="xs"
@@ -168,22 +229,47 @@ export function FolderBrowser({
         >
           <Home />
         </Button>
+        {/* Drive selector on Windows */}
+        {driveRoots.length > 1 && (
+          <>
+            <ChevronRight className="size-3 shrink-0 text-zinc-500" />
+            <div className="flex items-center gap-0.5 shrink-0">
+              {driveRoots.map((root) => (
+                <button
+                  key={root}
+                  type="button"
+                  onClick={() => navigateToDirectory(root)}
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-xs font-mono transition-colors hover:bg-zinc-700",
+                    currentPath.toUpperCase().startsWith(root.charAt(0).toUpperCase())
+                      ? "text-zinc-100 bg-zinc-700"
+                      : "text-zinc-500"
+                  )}
+                  title={root}
+                >
+                  {root.charAt(0)}:
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         <ChevronRight className="size-3 shrink-0 text-zinc-500" />
-        {pathSegments.map((segment, index) => {
-          const segmentPath = "/" + pathSegments.slice(0, index + 1).join("/");
-          const isLast = index === pathSegments.length - 1;
+        {breadcrumbs.map((seg, index) => {
+          const isLast = index === breadcrumbs.length - 1;
+          // Skip drive root in breadcrumbs if drives are shown above
+          if (index === 0 && driveRoots.length > 1 && isDriveRoot(seg.path)) return null;
 
           return (
-            <div key={segmentPath} className="flex items-center gap-1">
+            <div key={seg.path} className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
-                onClick={() => navigateToDirectory(segmentPath)}
+                onClick={() => navigateToDirectory(seg.path)}
                 className={cn(
                   "rounded px-1 py-0.5 text-sm transition-colors hover:bg-zinc-700",
                   isLast ? "text-zinc-100" : "text-zinc-400"
                 )}
               >
-                {segment}
+                {seg.label}
               </button>
               {!isLast && (
                 <ChevronRight className="size-3 shrink-0 text-zinc-500" />
