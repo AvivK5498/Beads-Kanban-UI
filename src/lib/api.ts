@@ -70,7 +70,12 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    throw new Error(`API error: ${res.status} ${res.statusText}`);
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      if (body?.error) detail = body.error;
+    } catch { /* no JSON body */ }
+    throw new Error(`API error: ${res.status} ${detail}`);
   }
   return res.json();
 }
@@ -125,12 +130,6 @@ export const beads = {
   read: (path: string) => fetchApi<{ beads: Bead[] }>(
     `/api/beads?path=${encodeURIComponent(path)}`
   ),
-
-  addComment: (path: string, beadId: string, text: string, author: string) =>
-    fetchApi<Bead>('/api/beads/comment', {
-      method: 'POST',
-      body: JSON.stringify({ path, bead_id: beadId, text, author }),
-    }),
 };
 
 /**
@@ -295,6 +294,8 @@ export const fs = {
     `/api/fs/exists?path=${encodeURIComponent(path)}`
   ),
 
+  roots: () => fetchApi<{ home: string; roots: string[] }>('/api/fs/roots'),
+
   openExternal: (path: string, target: 'vscode' | 'cursor' | 'finder') =>
     fetchApi<{ success: boolean }>('/api/fs/open-external', {
       method: 'POST',
@@ -345,6 +346,30 @@ export const agents = {
       method: 'PUT',
       body: JSON.stringify({ path, ...data }),
     }),
+};
+
+/**
+ * Dolt database status
+ */
+export interface DoltStatus {
+  running: boolean;
+  database_count: number | null;
+}
+
+/**
+ * Dolt database entry
+ */
+export interface DoltDatabase {
+  name: string;
+  project_name: string;
+}
+
+/**
+ * Dolt API
+ */
+export const dolt = {
+  status: () => fetchApi<DoltStatus>('/api/dolt/status'),
+  databases: () => fetchApi<{ databases: DoltDatabase[] }>('/api/dolt/databases'),
 };
 
 /**

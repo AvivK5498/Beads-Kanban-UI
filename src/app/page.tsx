@@ -340,6 +340,7 @@ export default function ProjectsPage() {
         open={isAddDialogOpen}
         onOpenChange={setIsAddDialogOpen}
         onAddProject={handleAddProject}
+        existingProjectNames={projects.map((p) => p.name)}
       />
 
       {/* Scan Directory Dialog */}

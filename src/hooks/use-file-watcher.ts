@@ -71,8 +71,8 @@ export function useFileWatcher(
   }, [debounceMs]);
 
   useEffect(() => {
-    // Don't set up watcher if no project path provided
-    if (!projectPath) {
+    // Don't set up watcher if no project path or dolt-only project
+    if (!projectPath || projectPath.startsWith("dolt://")) {
       return;
     }
 

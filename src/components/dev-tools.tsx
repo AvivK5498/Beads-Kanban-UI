@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, useEffect } from "react";
+
 import dynamic from "next/dynamic";
 
 const Agentation = dynamic(
@@ -7,27 +9,21 @@ const Agentation = dynamic(
   { ssr: false }
 );
 
-function isRuntimeDev(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  const nextData = (window as Window & { __NEXT_DATA__?: { dev?: boolean } })
-    .__NEXT_DATA__;
-  if (typeof nextData?.dev === "boolean") {
-    return nextData.dev;
-  }
-
-  const host = window.location.hostname;
-  return host === "localhost" || host === "127.0.0.1";
-}
-
 export function DevTools() {
-  const explicitlyEnabled = process.env.NEXT_PUBLIC_AGENTATION === "1";
-  const isDev = process.env.NODE_ENV === "development" || isRuntimeDev();
+  const [show, setShow] = useState(false);
 
-  if (!explicitlyEnabled && !isDev) {
-    return null;
-  }
+  useEffect(() => {
+    const explicitlyEnabled = process.env.NEXT_PUBLIC_AGENTATION === "1";
+    const isDev =
+      process.env.NODE_ENV === "development" ||
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1";
+
+    if (explicitlyEnabled || isDev) {
+      setShow(true);
+    }
+  }, []);
+
+  if (!show) return null;
   return <Agentation />;
 }

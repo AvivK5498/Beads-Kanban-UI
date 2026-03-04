@@ -375,6 +375,38 @@ pub async fn open_external(Json(request): Json<OpenExternalRequest>) -> impl Int
     }
 }
 
+/// GET /api/fs/roots
+///
+/// Returns the user's home directory and filesystem root paths.
+/// On Windows, roots are available drive letters (C:\, D:\, M:\, etc.).
+/// On Unix, roots is just ["/"].
+pub async fn fs_roots() -> impl IntoResponse {
+    let home = directories::UserDirs::new()
+        .map(|u| u.home_dir().to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let roots: Vec<String> = if cfg!(windows) {
+        // Check drives A-Z for existence
+        (b'A'..=b'Z')
+            .filter_map(|letter| {
+                let drive = format!("{}:\\", letter as char);
+                if PathBuf::from(&drive).exists() {
+                    Some(drive)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    } else {
+        vec!["/".to_string()]
+    };
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "home": home, "roots": roots })),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

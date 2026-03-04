@@ -1,9 +1,12 @@
 //! Beads API route handlers.
 //!
-//! Provides endpoints for reading and modifying beads from .beads/issues.jsonl files.
+//! Provides endpoints for reading beads data.
+//! Supports two data sources:
+//! - **Dolt** (preferred): reads via `bd list --json` + `bd sql` CLI commands
+//! - **JSONL** (fallback): reads from `.beads/issues.jsonl` if bd CLI is unavailable
 
 use axum::{
-    extract::Query,
+    extract::{Extension, Query},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -13,8 +16,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::process::Command;
 
 use super::validate_path_security;
+use crate::dolt::{self, DoltManager};
 
 /// Resolves the correct path to `issues.jsonl` for a project.
 ///
@@ -67,15 +74,24 @@ pub struct BeadsParams {
     pub path: String,
 }
 
-/// A dependency relationship in the JSONL file.
+/// A dependency relationship in the JSONL file (old format).
+///
+/// Old `bd` versions stored dependencies as:
+/// ```json
+/// "dependencies": [{"depends_on_id":"parent-1", "type":"parent-child"}]
+/// ```
 #[derive(Debug, Deserialize, Clone)]
-struct Dependency {
+pub(crate) struct LegacyDependency {
     depends_on_id: String,
     #[serde(rename = "type")]
     dep_type: String,
 }
 
 /// A single bead/issue from the JSONL file.
+///
+/// Supports both old and new `bd` CLI formats:
+/// - **Old**: `dependencies` as array of objects with `depends_on_id` and `type`
+/// - **New**: `parent` (string), `dependencies` as array of string IDs, `related` as array of strings
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Bead {
     pub id: String,
@@ -95,13 +111,13 @@ pub struct Bead {
     pub created_by: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "closedAt")]
     pub closed_at: Option<String>,
     #[serde(default)]
     pub close_reason: Option<String>,
     #[serde(default)]
     pub comments: Option<Vec<Comment>>,
-    #[serde(default)]
+    #[serde(default, alias = "parent")]
     pub parent_id: Option<String>,
     #[serde(default)]
     pub children: Option<Vec<String>>,
@@ -109,10 +125,50 @@ pub struct Bead {
     pub design_doc: Option<String>,
     #[serde(default)]
     pub deps: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, alias = "related")]
     pub relates_to: Option<Vec<String>>,
-    #[serde(default, skip_serializing)]
-    dependencies: Option<Vec<Dependency>>,
+    /// Raw dependencies field — accepts both old (array of objects) and new (array of strings) formats.
+    #[serde(default, skip_serializing, deserialize_with = "deserialize_dependencies")]
+    pub(crate) dependencies: Option<RawDependencies>,
+}
+
+/// Parsed dependencies in either old or new format.
+#[derive(Debug, Clone)]
+pub(crate) enum RawDependencies {
+    /// Old format: array of `{depends_on_id, type}` objects
+    Legacy(Vec<LegacyDependency>),
+    /// New format: flat array of string IDs (blocking deps)
+    StringIds(Vec<String>),
+}
+
+/// Custom deserializer that handles both old and new dependency formats.
+fn deserialize_dependencies<'de, D>(deserializer: D) -> Result<Option<RawDependencies>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    let arr = match value {
+        Some(serde_json::Value::Array(a)) => a,
+        Some(serde_json::Value::Null) | None => return Ok(None),
+        _ => return Err(serde::de::Error::custom("expected array or null for dependencies")),
+    };
+
+    if arr.is_empty() {
+        return Ok(None);
+    }
+
+    // Check first element to distinguish formats
+    if arr[0].is_string() {
+        // New format: ["id1", "id2"]
+        let ids: Vec<String> = serde_json::from_value(serde_json::Value::Array(arr))
+            .map_err(serde::de::Error::custom)?;
+        Ok(Some(RawDependencies::StringIds(ids)))
+    } else {
+        // Old format: [{depends_on_id, type}, ...]
+        let deps: Vec<LegacyDependency> = serde_json::from_value(serde_json::Value::Array(arr))
+            .map_err(serde::de::Error::custom)?;
+        Ok(Some(RawDependencies::Legacy(deps)))
+    }
 }
 
 /// A comment on a bead.
@@ -125,11 +181,125 @@ pub struct Comment {
     pub created_at: String,
 }
 
-/// GET /api/beads?path=/path/to/project
+/// Runs a `bd` CLI command and returns stdout.
+async fn run_bd(args: &[&str], cwd: &Path) -> Result<String, String> {
+    let result = tokio::time::timeout(
+        Duration::from_secs(30),
+        Command::new("bd").args(args).current_dir(cwd).output(),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(output)) => {
+            if output.status.success() {
+                String::from_utf8(output.stdout)
+                    .map_err(|e| format!("Invalid UTF-8 in bd output: {}", e))
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(format!("bd exited with {}: {}", output.status, stderr))
+            }
+        }
+        Ok(Err(e)) => Err(format!("Failed to run bd: {}", e)),
+        Err(_) => Err("bd command timed out after 30s".to_string()),
+    }
+}
+
+/// Reads beads from the Dolt database via `bd` CLI.
 ///
-/// Reads the .beads/issues.jsonl file from the specified project path
-/// and returns an array of beads.
-pub async fn read_beads(Query(params): Query<BeadsParams>) -> impl IntoResponse {
+/// Calls `bd list --json` for issues and `bd sql` for comments,
+/// then merges them together.
+async fn read_beads_from_cli(project_path: &Path) -> Result<Vec<Bead>, String> {
+    // Get all beads
+    let list_output = run_bd(&["list", "--json"], project_path).await?;
+    let mut beads: Vec<Bead> = serde_json::from_str(&list_output)
+        .map_err(|e| format!("Failed to parse bd list output: {}", e))?;
+
+    // Get all comments
+    let comments_output = run_bd(
+        &["sql", "SELECT * FROM comments ORDER BY issue_id, id", "--json"],
+        project_path,
+    )
+    .await;
+
+    if let Ok(output) = comments_output {
+        if let Ok(comments) = serde_json::from_str::<Vec<Comment>>(&output) {
+            // Group comments by issue_id
+            let mut comments_map: HashMap<String, Vec<Comment>> = HashMap::new();
+            for comment in comments {
+                comments_map
+                    .entry(comment.issue_id.clone())
+                    .or_default()
+                    .push(comment);
+            }
+            // Merge into beads
+            for bead in &mut beads {
+                if let Some(bead_comments) = comments_map.remove(&bead.id) {
+                    bead.comments = Some(bead_comments);
+                }
+            }
+        } else {
+            tracing::warn!("Failed to parse comments from bd sql, continuing without comments");
+        }
+    } else {
+        tracing::warn!("Failed to fetch comments via bd sql, continuing without comments");
+    }
+
+    Ok(beads)
+}
+
+/// Reads beads from the JSONL file (fallback when bd CLI is unavailable).
+fn read_beads_from_jsonl(issues_path: &Path) -> Result<Vec<Bead>, String> {
+    let contents = std::fs::read_to_string(issues_path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let mut beads = Vec::new();
+    for (line_num, line) in contents.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<Bead>(line) {
+            Ok(bead) => beads.push(bead),
+            Err(e) => {
+                tracing::warn!("Failed to parse bead at line {}: {} - {}", line_num + 1, e, line);
+            }
+        }
+    }
+    Ok(beads)
+}
+
+/// Dolt-only path prefix: `dolt://beads_dbname`
+const DOLT_PATH_PREFIX: &str = "dolt://";
+
+/// GET /api/beads?path=/path/to/project
+/// GET /api/beads?path=dolt://beads_dbname
+///
+/// Reads beads from a project. For `dolt://` paths, reads directly from Dolt SQL.
+/// For filesystem paths, uses three-tier fallback: Dolt SQL → bd CLI → JSONL.
+pub async fn read_beads(
+    Extension(dolt_manager): Extension<Arc<DoltManager>>,
+    Query(params): Query<BeadsParams>,
+) -> impl IntoResponse {
+    // Direct Dolt read for dolt:// paths (no filesystem needed)
+    if let Some(db_name) = params.path.strip_prefix(DOLT_PATH_PREFIX) {
+        if !dolt_manager.is_available() && !dolt_manager.check_server().await {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "Dolt server is not running" })),
+            );
+        }
+        return match dolt_manager.read_beads(db_name).await {
+            Ok(beads) => {
+                let beads = post_process_beads(beads);
+                (StatusCode::OK, Json(serde_json::json!({ "beads": beads })))
+            }
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            ),
+        };
+    }
+
     let project_path = PathBuf::from(&params.path);
 
     // Security: Validate path is within allowed directories
@@ -140,89 +310,140 @@ pub async fn read_beads(Query(params): Query<BeadsParams>) -> impl IntoResponse 
         );
     }
 
-    let issues_path = resolve_issues_path(&project_path);
-
-    // Check if the file exists
-    if !issues_path.exists() {
+    // Check that project has a .beads directory
+    let beads_dir = project_path.join(".beads");
+    if !beads_dir.exists() {
         return (
             StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "No .beads/issues.jsonl found at the specified path" })),
+            Json(serde_json::json!({ "error": "No .beads directory found at the specified path" })),
         );
     }
 
-    // Read the file contents
-    let contents = match std::fs::read_to_string(&issues_path) {
-        Ok(c) => c,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("Failed to read file: {}", e) })),
-            );
-        }
-    };
+    // Three-tier fallback: Dolt SQL → bd CLI → JSONL
+    let mut skip_cli = false;
 
-    // Parse JSONL (each line is a JSON object)
-    let mut beads = Vec::new();
-    for (line_num, line) in contents.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        match serde_json::from_str::<Bead>(line) {
-            Ok(bead) => beads.push(bead),
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to parse bead at line {}: {} - {}",
-                    line_num + 1,
-                    e,
-                    line
-                );
-                // Continue parsing other lines - graceful handling of malformed lines
-            }
-        }
-    }
-
-    // Post-process: Transform dependencies into parent_id and children
-    // Build a map of parent_id -> Vec<child_id>
-    let mut parent_to_children: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-
-    // First pass: Extract parent-child relationships from explicit dependencies
-    for bead in &mut beads {
-        if let Some(deps) = &bead.dependencies {
-            for dep in deps {
-                if dep.dep_type == "parent-child" {
-                    // Set parent_id on this bead
-                    bead.parent_id = Some(dep.depends_on_id.clone());
-                    // Record this bead as a child of the parent
-                    parent_to_children
-                        .entry(dep.depends_on_id.clone())
-                        .or_default()
-                        .push(bead.id.clone());
+    // Tier 1: Try Dolt SQL (direct MySQL connection)
+    let beads = 'fallback: {
+        if dolt_manager.is_available() {
+            if let Some(db_name) = dolt::database_name_for_project(&project_path) {
+                match dolt_manager.read_beads(&db_name).await {
+                    Ok(b) => break 'fallback b,
+                    Err(crate::dolt::DoltError::DatabaseNotFound(_)) => {
+                        tracing::debug!("Dolt database {} not found, skipping to JSONL", db_name);
+                        skip_cli = true;
+                    }
+                    Err(e) => {
+                        tracing::debug!("Dolt SQL failed for {} ({}), trying bd CLI", db_name, e);
+                    }
                 }
             }
         }
+
+        // Tier 2: Try bd CLI (skip if Dolt already said DB doesn't exist)
+        if !skip_cli {
+            match read_beads_from_cli(&project_path).await {
+                Ok(b) => {
+                    tracing::info!("Read {} beads from bd CLI for {}", b.len(), params.path);
+                    break 'fallback b;
+                }
+                Err(cli_err) => {
+                    tracing::debug!("bd CLI unavailable ({}), falling back to JSONL", cli_err);
+                }
+            }
+        }
+
+        // Tier 3: JSONL file
+        let issues_path = resolve_issues_path(&project_path);
+        if !issues_path.exists() {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "No data source available: Dolt SQL, bd CLI, and JSONL all failed" })),
+            );
+        }
+        match read_beads_from_jsonl(&issues_path) {
+            Ok(b) => b,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": e })),
+                );
+            }
+        }
+    };
+
+    let beads = post_process_beads(beads);
+    (StatusCode::OK, Json(serde_json::json!({ "beads": beads })))
+}
+
+/// Post-processes beads: resolves dependencies, infers parent-child from ID patterns, sets children.
+fn post_process_beads(mut beads: Vec<Bead>) -> Vec<Bead> {
+    let mut parent_to_children: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+
+    // First pass: Extract relationships from dependencies (both old and new format)
+    for bead in &mut beads {
+        if let Some(raw_deps) = bead.dependencies.take() {
+            match raw_deps {
+                RawDependencies::Legacy(legacy_deps) => {
+                    let mut blocking = Vec::new();
+                    let mut related = Vec::new();
+                    for dep in &legacy_deps {
+                        match dep.dep_type.as_str() {
+                            "parent-child" => {
+                                bead.parent_id = Some(dep.depends_on_id.clone());
+                                parent_to_children
+                                    .entry(dep.depends_on_id.clone())
+                                    .or_default()
+                                    .push(bead.id.clone());
+                            }
+                            "relates-to" => {
+                                related.push(dep.depends_on_id.clone());
+                            }
+                            _ => {
+                                blocking.push(dep.depends_on_id.clone());
+                            }
+                        }
+                    }
+                    if !blocking.is_empty() && bead.deps.is_none() {
+                        bead.deps = Some(blocking);
+                    }
+                    if !related.is_empty() && bead.relates_to.is_none() {
+                        bead.relates_to = Some(related);
+                    }
+                }
+                RawDependencies::StringIds(ids) => {
+                    if !ids.is_empty() && bead.deps.is_none() {
+                        bead.deps = Some(ids);
+                    }
+                }
+            }
+        }
+
+        if let Some(parent_id) = &bead.parent_id {
+            parent_to_children
+                .entry(parent_id.clone())
+                .or_default()
+                .push(bead.id.clone());
+        }
+    }
+
+    for children in parent_to_children.values_mut() {
+        children.sort();
+        children.dedup();
     }
 
     // Second pass: Infer parent-child from ID patterns (e.g., "64n.1" -> parent "64n")
-    // This matches how the bd CLI infers relationships when parent_id is not set
-    // Collect existing bead IDs first to avoid borrow issues
     let bead_ids: std::collections::HashSet<String> =
         beads.iter().map(|b| b.id.clone()).collect();
 
-    // Collect inferred relationships: (child_id, parent_id)
     let inferred: Vec<(String, String)> = beads
         .iter()
         .filter_map(|bead| {
-            // Only infer if parent_id is not already set
             if bead.parent_id.is_some() {
                 return None;
             }
-            // Check if ID contains a dot (indicating potential child)
             let dot_pos = bead.id.rfind('.')?;
             let potential_parent = &bead.id[..dot_pos];
-            // Only infer if the parent exists
             if bead_ids.contains(potential_parent) {
                 Some((bead.id.clone(), potential_parent.to_string()))
             } else {
@@ -231,13 +452,10 @@ pub async fn read_beads(Query(params): Query<BeadsParams>) -> impl IntoResponse 
         })
         .collect();
 
-    // Apply inferred relationships
     for (child_id, inferred_parent_id) in &inferred {
-        // Set parent_id on the child bead
         if let Some(bead) = beads.iter_mut().find(|b| &b.id == child_id) {
             bead.parent_id = Some(inferred_parent_id.clone());
         }
-        // Record in parent_to_children map
         parent_to_children
             .entry(inferred_parent_id.clone())
             .or_default()
@@ -251,226 +469,7 @@ pub async fn read_beads(Query(params): Query<BeadsParams>) -> impl IntoResponse 
         }
     }
 
-    // Fourth pass: Extract relates-to dependencies into relates_to field
-    for bead in &mut beads {
-        if let Some(deps) = &bead.dependencies {
-            let related: Vec<String> = deps
-                .iter()
-                .filter(|dep| dep.dep_type == "relates-to")
-                .map(|dep| dep.depends_on_id.clone())
-                .collect();
-            if !related.is_empty() {
-                bead.relates_to = Some(related);
-            }
-        }
-    }
-
-    (StatusCode::OK, Json(serde_json::json!({ "beads": beads })))
-}
-
-/// Request body for adding a comment to a bead.
-#[derive(Debug, Deserialize)]
-pub struct AddCommentRequest {
-    /// The project path containing .beads/issues.jsonl
-    pub path: String,
-    /// The ID of the bead to add a comment to
-    pub bead_id: String,
-    /// The comment text
-    pub text: String,
-    /// The author of the comment (e.g., email address)
-    pub author: String,
-}
-
-/// Response for the add comment endpoint.
-#[derive(Debug, Serialize)]
-pub struct AddCommentResponse {
-    pub success: bool,
-    pub bead: Option<Bead>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
-/// POST /api/beads/comment
-///
-/// Adds a comment to a specific bead in the .beads/issues.jsonl file.
-pub async fn add_comment(Json(payload): Json<AddCommentRequest>) -> impl IntoResponse {
-    let project_path = PathBuf::from(&payload.path);
-
-    // Security: Validate path is within allowed directories
-    if let Err(e) = validate_path_security(&project_path) {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(AddCommentResponse {
-                success: false,
-                bead: None,
-                error: Some(e),
-            }),
-        );
-    }
-
-    let issues_path = resolve_issues_path(&project_path);
-
-    // Check if the file exists
-    if !issues_path.exists() {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(AddCommentResponse {
-                success: false,
-                bead: None,
-                error: Some("No .beads/issues.jsonl found at the specified path".to_string()),
-            }),
-        );
-    }
-
-    // Read the file contents
-    let contents = match std::fs::read_to_string(&issues_path) {
-        Ok(c) => c,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(AddCommentResponse {
-                    success: false,
-                    bead: None,
-                    error: Some(format!("Failed to read file: {}", e)),
-                }),
-            );
-        }
-    };
-
-    // Parse JSONL and find the target bead
-    let mut beads: Vec<Bead> = Vec::new();
-    let mut found_bead_index: Option<usize> = None;
-    let mut max_comment_id: i64 = 0;
-
-    for (line_num, line) in contents.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        match serde_json::from_str::<Bead>(line) {
-            Ok(bead) => {
-                // Track the maximum comment ID across all beads
-                if let Some(comments) = &bead.comments {
-                    for comment in comments {
-                        if comment.id > max_comment_id {
-                            max_comment_id = comment.id;
-                        }
-                    }
-                }
-
-                if bead.id == payload.bead_id {
-                    found_bead_index = Some(beads.len());
-                }
-                beads.push(bead);
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to parse bead at line {}: {} - {}",
-                    line_num + 1,
-                    e,
-                    line
-                );
-                // Continue parsing other lines - graceful handling of malformed lines
-            }
-        }
-    }
-
-    // Check if the bead was found
-    let bead_index = match found_bead_index {
-        Some(idx) => idx,
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(AddCommentResponse {
-                    success: false,
-                    bead: None,
-                    error: Some(format!("Bead with id '{}' not found", payload.bead_id)),
-                }),
-            );
-        }
-    };
-
-    // Create the new comment
-    let new_comment = Comment {
-        id: max_comment_id + 1,
-        issue_id: payload.bead_id.clone(),
-        author: payload.author,
-        text: payload.text,
-        created_at: Utc::now().to_rfc3339(),
-    };
-
-    // Add the comment to the bead
-    let bead = &mut beads[bead_index];
-    match &mut bead.comments {
-        Some(comments) => comments.push(new_comment),
-        None => bead.comments = Some(vec![new_comment]),
-    }
-
-    // Write the updated beads back to the file
-    let file = match std::fs::File::create(&issues_path) {
-        Ok(f) => f,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(AddCommentResponse {
-                    success: false,
-                    bead: None,
-                    error: Some(format!("Failed to open file for writing: {}", e)),
-                }),
-            );
-        }
-    };
-
-    let mut writer = std::io::BufWriter::new(file);
-    for bead in &beads {
-        match serde_json::to_string(bead) {
-            Ok(json_line) => {
-                if let Err(e) = writeln!(writer, "{}", json_line) {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(AddCommentResponse {
-                            success: false,
-                            bead: None,
-                            error: Some(format!("Failed to write to file: {}", e)),
-                        }),
-                    );
-                }
-            }
-            Err(e) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(AddCommentResponse {
-                        success: false,
-                        bead: None,
-                        error: Some(format!("Failed to serialize bead: {}", e)),
-                    }),
-                );
-            }
-        }
-    }
-
-    if let Err(e) = writer.flush() {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(AddCommentResponse {
-                success: false,
-                bead: None,
-                error: Some(format!("Failed to flush file: {}", e)),
-            }),
-        );
-    }
-
-    // Return the updated bead
-    let updated_bead = beads.swap_remove(bead_index);
-    (
-        StatusCode::OK,
-        Json(AddCommentResponse {
-            success: true,
-            bead: Some(updated_bead),
-            error: None,
-        }),
-    )
+    beads
 }
 
 /// Computes the appropriate status for an epic based on its children's statuses.
@@ -524,11 +523,17 @@ fn compute_epic_status_from_children(child_statuses: &[&str]) -> Option<&'static
 /// * `Ok(Vec<String>)` - List of epic IDs that were updated
 /// * `Err(String)` - Error message if something went wrong
 pub fn recompute_epic_statuses(issues_path: &Path) -> Result<Vec<String>, String> {
+    // Skip if JSONL doesn't exist (Dolt mode — bd manages its own data)
+    if !issues_path.exists() {
+        return Ok(vec![]);
+    }
+
     // Read the file contents
     let contents = std::fs::read_to_string(issues_path)
         .map_err(|e| format!("Failed to read file: {}", e))?;
 
-    // Parse JSONL into beads
+    // Parse JSONL as both raw Values (for lossless write-back) and Beads (for logic)
+    let mut raw_lines: Vec<serde_json::Value> = Vec::new();
     let mut beads: Vec<Bead> = Vec::new();
     for (line_num, line) in contents.lines().enumerate() {
         let line = line.trim();
@@ -536,28 +541,39 @@ pub fn recompute_epic_statuses(issues_path: &Path) -> Result<Vec<String>, String
             continue;
         }
 
-        match serde_json::from_str::<Bead>(line) {
-            Ok(bead) => beads.push(bead),
+        match serde_json::from_str::<serde_json::Value>(line) {
+            Ok(value) => {
+                match serde_json::from_value::<Bead>(value.clone()) {
+                    Ok(bead) => beads.push(bead),
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to parse bead at line {}: {}",
+                            line_num + 1,
+                            e
+                        );
+                    }
+                }
+                raw_lines.push(value);
+            }
             Err(e) => {
                 tracing::warn!(
-                    "Failed to parse bead at line {}: {} - {}",
+                    "Failed to parse JSON at line {}: {}",
                     line_num + 1,
-                    e,
-                    line
+                    e
                 );
             }
         }
     }
 
     // Build parent-child relationships
-    // parent_id -> Vec<child_id>
     let mut parent_to_children: HashMap<String, Vec<String>> = HashMap::new();
 
-    // First pass: Extract from explicit dependencies
-    for bead in &beads {
-        if let Some(deps) = &bead.dependencies {
-            for dep in deps {
+    // First pass: Extract from dependencies and parent field
+    for bead in &mut beads {
+        if let Some(RawDependencies::Legacy(ref legacy_deps)) = bead.dependencies {
+            for dep in legacy_deps {
                 if dep.dep_type == "parent-child" {
+                    bead.parent_id = Some(dep.depends_on_id.clone());
                     parent_to_children
                         .entry(dep.depends_on_id.clone())
                         .or_default()
@@ -565,19 +581,23 @@ pub fn recompute_epic_statuses(issues_path: &Path) -> Result<Vec<String>, String
                 }
             }
         }
+
+        if let Some(parent_id) = &bead.parent_id {
+            let children = parent_to_children.entry(parent_id.clone()).or_default();
+            if !children.contains(&bead.id) {
+                children.push(bead.id.clone());
+            }
+        }
     }
 
-    // Second pass: Infer parent-child from ID patterns (e.g., "64n.1" -> parent "64n")
-    // This matches how the bd CLI infers relationships when parent_id is not set
+    // Second pass: Infer parent-child from ID patterns
     let bead_ids: std::collections::HashSet<String> =
         beads.iter().map(|b| b.id.clone()).collect();
 
     for bead in &beads {
-        // Only infer if not already in parent_to_children
         if bead.parent_id.is_none() && bead.id.contains('.') {
             if let Some(dot_pos) = bead.id.rfind('.') {
                 let potential_parent = &bead.id[..dot_pos];
-                // Only infer if parent exists and not already recorded
                 if bead_ids.contains(potential_parent) {
                     let children = parent_to_children
                         .entry(potential_parent.to_string())
@@ -590,39 +610,30 @@ pub fn recompute_epic_statuses(issues_path: &Path) -> Result<Vec<String>, String
         }
     }
 
-    // Build a map of bead_id -> status for quick lookup (owned strings to avoid borrow issues)
+    // Build status map
     let status_map: HashMap<String, String> = beads
         .iter()
         .map(|b| (b.id.clone(), b.status.clone()))
         .collect();
 
-    // First pass: find which epics need updates
+    // Find which epics need updates
     let mut epic_updates: Vec<(String, String)> = Vec::new();
 
     for bead in &beads {
-        // Only process epics
         if bead.issue_type.as_deref() != Some("epic") {
             continue;
         }
-
-        // Skip closed epics - don't auto-reopen them
         if bead.status == "closed" {
             continue;
         }
-
-        // Get children for this epic
         let children = match parent_to_children.get(&bead.id) {
             Some(c) => c,
-            None => continue, // No children, skip
+            None => continue,
         };
-
-        // Collect child statuses
         let child_statuses: Vec<&str> = children
             .iter()
             .filter_map(|child_id| status_map.get(child_id).map(String::as_str))
             .collect();
-
-        // Compute the new status
         if let Some(new_status) = compute_epic_status_from_children(&child_statuses) {
             if bead.status != new_status {
                 epic_updates.push((bead.id.clone(), new_status.to_string()));
@@ -630,35 +641,36 @@ pub fn recompute_epic_statuses(issues_path: &Path) -> Result<Vec<String>, String
         }
     }
 
-    // Second pass: apply updates
+    // Apply updates to raw JSON values (preserving original field names)
     let mut updated_epic_ids: Vec<String> = Vec::new();
 
     for (epic_id, new_status) in &epic_updates {
-        for bead in &mut beads {
-            if &bead.id == epic_id {
-                tracing::info!(
-                    "Updating epic {} status from {} to {}",
-                    bead.id,
-                    bead.status,
-                    new_status
-                );
-                bead.status = new_status.clone();
-                bead.updated_at = Some(Utc::now().to_rfc3339());
-                updated_epic_ids.push(bead.id.clone());
-                break;
+        for value in &mut raw_lines {
+            if let Some(obj) = value.as_object_mut() {
+                if obj.get("id").and_then(|v| v.as_str()) == Some(epic_id) {
+                    tracing::info!(
+                        "Updating epic {} status to {}",
+                        epic_id,
+                        new_status
+                    );
+                    obj.insert("status".to_string(), serde_json::json!(new_status));
+                    obj.insert("updated_at".to_string(), serde_json::json!(Utc::now().to_rfc3339()));
+                    updated_epic_ids.push(epic_id.clone());
+                    break;
+                }
             }
         }
     }
 
-    // Write back if any epic was updated
+    // Write back if any epic was updated (using raw values to preserve format)
     if !updated_epic_ids.is_empty() {
         let file = std::fs::File::create(issues_path)
             .map_err(|e| format!("Failed to open file for writing: {}", e))?;
 
         let mut writer = std::io::BufWriter::new(file);
-        for bead in &beads {
-            let json_line = serde_json::to_string(bead)
-                .map_err(|e| format!("Failed to serialize bead: {}", e))?;
+        for value in &raw_lines {
+            let json_line = serde_json::to_string(value)
+                .map_err(|e| format!("Failed to serialize: {}", e))?;
             writeln!(writer, "{}", json_line)
                 .map_err(|e| format!("Failed to write to file: {}", e))?;
         }
@@ -805,117 +817,60 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_bead_with_relates_to_dependencies() {
-        // Test that relates-to dependencies are deserialized from the dependencies array
-        let json = r#"{"id":"bead-a","title":"Bead A","status":"open","dependencies":[{"issue_id":"bead-a","depends_on_id":"bead-b","type":"relates-to","created_at":"2026-01-27T00:00:00Z","created_by":"user"},{"issue_id":"bead-a","depends_on_id":"bead-c","type":"relates-to","created_at":"2026-01-27T00:00:00Z","created_by":"user"}]}"#;
+    fn test_parse_old_format_dependencies() {
+        // Old format: dependencies as array of objects
+        let json = r#"{"id":"bead-a","title":"Bead A","status":"open","dependencies":[{"issue_id":"bead-a","depends_on_id":"bead-b","type":"relates-to","created_at":"2026-01-27T00:00:00Z","created_by":"user"},{"issue_id":"bead-a","depends_on_id":"bead-c","type":"parent-child","created_at":"2026-01-27T00:00:00Z","created_by":"user"}]}"#;
         let bead: Bead = serde_json::from_str(json).unwrap();
-        let deps = bead.dependencies.unwrap();
-        assert_eq!(deps.len(), 2);
-        assert_eq!(deps[0].dep_type, "relates-to");
-        assert_eq!(deps[0].depends_on_id, "bead-b");
-        assert_eq!(deps[1].dep_type, "relates-to");
-        assert_eq!(deps[1].depends_on_id, "bead-c");
+        assert!(bead.dependencies.is_some());
+        if let Some(RawDependencies::Legacy(deps)) = &bead.dependencies {
+            assert_eq!(deps.len(), 2);
+            assert_eq!(deps[0].dep_type, "relates-to");
+            assert_eq!(deps[0].depends_on_id, "bead-b");
+            assert_eq!(deps[1].dep_type, "parent-child");
+        } else {
+            panic!("Expected Legacy dependencies");
+        }
     }
 
     #[test]
-    fn test_relates_to_extraction_logic() {
-        // Test the fourth pass extraction logic that populates relates_to from dependencies
-        let mut bead = Bead {
-            id: "bead-a".to_string(),
-            title: "Bead A".to_string(),
-            description: None,
-            status: "open".to_string(),
-            priority: None,
-            issue_type: None,
-            owner: None,
-            created_at: None,
-            created_by: None,
-            updated_at: None,
-            closed_at: None,
-            close_reason: None,
-            comments: None,
-            parent_id: None,
-            children: None,
-            design_doc: None,
-            deps: None,
-            relates_to: None,
-            dependencies: Some(vec![
-                Dependency {
-                    depends_on_id: "bead-b".to_string(),
-                    dep_type: "relates-to".to_string(),
-                },
-                Dependency {
-                    depends_on_id: "bead-parent".to_string(),
-                    dep_type: "parent-child".to_string(),
-                },
-                Dependency {
-                    depends_on_id: "bead-c".to_string(),
-                    dep_type: "relates-to".to_string(),
-                },
-            ]),
-        };
-
-        // Simulate the fourth pass extraction logic
-        if let Some(deps) = &bead.dependencies {
-            let related: Vec<String> = deps
-                .iter()
-                .filter(|dep| dep.dep_type == "relates-to")
-                .map(|dep| dep.depends_on_id.clone())
-                .collect();
-            if !related.is_empty() {
-                bead.relates_to = Some(related);
-            }
+    fn test_parse_new_format_dependencies() {
+        // New format: dependencies as array of strings
+        let json = r#"{"id":"task-71","title":"New Task","status":"open","parent":"epic-65","dependencies":["task-67"],"related":["task-35"]}"#;
+        let bead: Bead = serde_json::from_str(json).unwrap();
+        // parent field should be deserialized into parent_id
+        assert_eq!(bead.parent_id, Some("epic-65".to_string()));
+        // related field should be deserialized into relates_to
+        assert_eq!(bead.relates_to, Some(vec!["task-35".to_string()]));
+        // dependencies should be parsed as StringIds
+        if let Some(RawDependencies::StringIds(ids)) = &bead.dependencies {
+            assert_eq!(ids, &vec!["task-67".to_string()]);
+        } else {
+            panic!("Expected StringIds dependencies");
         }
-
-        // Verify only relates-to deps are extracted, not parent-child
-        let relates_to = bead.relates_to.unwrap();
-        assert_eq!(relates_to.len(), 2);
-        assert_eq!(relates_to[0], "bead-b");
-        assert_eq!(relates_to[1], "bead-c");
     }
 
     #[test]
-    fn test_relates_to_none_when_no_relates_to_deps() {
-        // Test that relates_to stays None when there are no relates-to dependencies
-        let mut bead = Bead {
-            id: "bead-x".to_string(),
-            title: "Bead X".to_string(),
-            description: None,
-            status: "open".to_string(),
-            priority: None,
-            issue_type: None,
-            owner: None,
-            created_at: None,
-            created_by: None,
-            updated_at: None,
-            closed_at: None,
-            close_reason: None,
-            comments: None,
-            parent_id: None,
-            children: None,
-            design_doc: None,
-            deps: None,
-            relates_to: None,
-            dependencies: Some(vec![Dependency {
-                depends_on_id: "bead-parent".to_string(),
-                dep_type: "parent-child".to_string(),
-            }]),
-        };
+    fn test_parse_new_format_closed_at_camel_case() {
+        // New format uses closedAt instead of closed_at
+        let json = r#"{"id":"task-67","title":"Done","status":"closed","closedAt":"2026-02-28T12:53:27.963Z"}"#;
+        let bead: Bead = serde_json::from_str(json).unwrap();
+        assert_eq!(bead.closed_at, Some("2026-02-28T12:53:27.963Z".to_string()));
+    }
 
-        // Simulate the fourth pass extraction logic
-        if let Some(deps) = &bead.dependencies {
-            let related: Vec<String> = deps
-                .iter()
-                .filter(|dep| dep.dep_type == "relates-to")
-                .map(|dep| dep.depends_on_id.clone())
-                .collect();
-            if !related.is_empty() {
-                bead.relates_to = Some(related);
-            }
-        }
+    #[test]
+    fn test_parse_empty_dependencies_array() {
+        // Empty dependencies array should parse as None
+        let json = r#"{"id":"task-1","title":"No deps","status":"open","dependencies":[]}"#;
+        let bead: Bead = serde_json::from_str(json).unwrap();
+        assert!(bead.dependencies.is_none());
+    }
 
-        // No relates-to deps, so relates_to should remain None
-        assert!(bead.relates_to.is_none());
+    #[test]
+    fn test_parse_no_dependencies_field() {
+        // Missing dependencies field should parse fine
+        let json = r#"{"id":"task-2","title":"Simple","status":"open"}"#;
+        let bead: Bead = serde_json::from_str(json).unwrap();
+        assert!(bead.dependencies.is_none());
     }
 
     #[test]
@@ -941,10 +896,7 @@ mod tests {
             design_doc: None,
             deps: None,
             relates_to: Some(vec!["bead-r1".to_string(), "bead-r2".to_string()]),
-            dependencies: Some(vec![Dependency {
-                depends_on_id: "bead-r1".to_string(),
-                dep_type: "relates-to".to_string(),
-            }]),
+            dependencies: None,
         };
 
         let json = serde_json::to_string(&bead).unwrap();
@@ -956,7 +908,56 @@ mod tests {
 
         // dependencies should NOT be serialized (skip_serializing)
         assert!(!json.contains("dependencies"));
-        assert!(!json.contains("depends_on_id"));
+    }
+
+    #[test]
+    fn test_parse_real_new_format_line() {
+        // Real line from updated bd CLI
+        let json = r#"{"id":"ai-photo-factory-71","title":"Миграция лендинга","description":"Описание задачи","status":"open","priority":2,"issue_type":"task","owner":"user@email.com","created_at":"2026-02-28T11:30:26.430Z","created_by":"weselow","updated_at":"2026-02-28T11:30:26.430Z","parent":"ai-photo-factory-65","dependencies":["ai-photo-factory-67"]}"#;
+        let bead: Bead = serde_json::from_str(json).unwrap();
+        assert_eq!(bead.id, "ai-photo-factory-71");
+        assert_eq!(bead.parent_id, Some("ai-photo-factory-65".to_string()));
+        if let Some(RawDependencies::StringIds(ids)) = &bead.dependencies {
+            assert_eq!(ids, &vec!["ai-photo-factory-67".to_string()]);
+        } else {
+            panic!("Expected StringIds dependencies");
+        }
+    }
+
+    #[test]
+    fn test_parse_new_format_with_related() {
+        // New format with related field
+        let json = r#"{"id":"task-75","title":"Post-processing","status":"open","parent":"epic-65","dependencies":["task-66"],"related":["task-35"]}"#;
+        let bead: Bead = serde_json::from_str(json).unwrap();
+        assert_eq!(bead.relates_to, Some(vec!["task-35".to_string()]));
+        assert_eq!(bead.parent_id, Some("epic-65".to_string()));
+    }
+
+    #[test]
+    fn test_roundtrip_via_raw_value_preserves_format() {
+        // Simulate what add_comment and recompute_epic_statuses now do:
+        // parse as serde_json::Value, modify, write back
+        let input = r#"{"id":"task-71","title":"Migration","status":"open","parent":"epic-65","dependencies":["task-67"],"related":["task-35"],"closedAt":"2026-02-28T12:00:00Z"}"#;
+
+        // Parse as raw Value (as server now does)
+        let value: serde_json::Value = serde_json::from_str(input).unwrap();
+
+        // Serialize back
+        let output = serde_json::to_string(&value).unwrap();
+
+        println!("INPUT:  {}", input);
+        println!("OUTPUT: {}", output);
+
+        // All original field names must be preserved
+        assert!(output.contains("\"parent\":\"epic-65\""), "parent field preserved");
+        assert!(output.contains("\"dependencies\":[\"task-67\"]"), "dependencies preserved");
+        assert!(output.contains("\"related\":[\"task-35\"]"), "related field preserved");
+        assert!(output.contains("\"closedAt\":\"2026-02-28T12:00:00Z\""), "closedAt preserved");
+
+        // No mangled field names
+        assert!(!output.contains("parent_id"), "no parent_id in output");
+        assert!(!output.contains("relates_to"), "no relates_to in output");
+        assert!(!output.contains("closed_at"), "no closed_at in output");
     }
 
     // ── resolve_issues_path tests ──────────────────────────────────────

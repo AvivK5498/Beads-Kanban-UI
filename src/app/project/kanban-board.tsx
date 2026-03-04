@@ -132,10 +132,12 @@ export default function KanbanBoard() {
   // Filter out closed beads to avoid unnecessary polling for finalized tasks
   const beadIds = useMemo(() => beads.filter(b => b.status !== 'closed').map(b => b.id), [beads]);
 
-  // Worktree statuses for PR workflow
+  const isDoltOnly = project?.path?.startsWith("dolt://") ?? false;
+
+  // Worktree statuses for PR workflow (skip for dolt-only projects)
   const { statuses: worktreeStatuses } = useWorktreeStatuses(
-    project?.path ?? "",
-    beadIds
+    isDoltOnly ? "" : (project?.path ?? ""),
+    isDoltOnly ? [] : beadIds
   );
 
   /**
@@ -389,7 +391,7 @@ export default function KanbanBoard() {
         <BeadDetail
           bead={detailBead}
           ticketNumber={ticketNumbers.get(detailBead.id)}
-          worktreeStatus={worktreeStatuses[detailBead.id]}
+          worktreeStatus={isDoltOnly ? undefined : worktreeStatuses[detailBead.id]}
           open={isDetailOpen}
           onOpenChange={(open) => {
             setIsDetailOpen(open);
