@@ -13,6 +13,21 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use uuid::Uuid;
+
+/// Accepts comment IDs as either integers (legacy) or strings (bd ≥ 1.0.5 UUID v7).
+fn deserialize_comment_id<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde_json::Value;
+    let v = Value::deserialize(deserializer)?;
+    match v {
+        Value::String(s) => Ok(s),
+        Value::Number(n) => Ok(n.to_string()),
+        _ => Err(serde::de::Error::custom("expected string or integer for comment id")),
+    }
+}
 
 use super::validate_path_security;
 
@@ -118,7 +133,8 @@ pub struct Bead {
 /// A comment on a bead.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Comment {
-    pub id: i64,
+    #[serde(deserialize_with = "deserialize_comment_id")]
+    pub id: String,
     pub issue_id: String,
     pub author: String,
     pub text: String,
@@ -340,7 +356,6 @@ pub async fn add_comment(Json(payload): Json<AddCommentRequest>) -> impl IntoRes
     // Parse JSONL and find the target bead
     let mut beads: Vec<Bead> = Vec::new();
     let mut found_bead_index: Option<usize> = None;
-    let mut max_comment_id: i64 = 0;
 
     for (line_num, line) in contents.lines().enumerate() {
         let line = line.trim();
@@ -350,15 +365,6 @@ pub async fn add_comment(Json(payload): Json<AddCommentRequest>) -> impl IntoRes
 
         match serde_json::from_str::<Bead>(line) {
             Ok(bead) => {
-                // Track the maximum comment ID across all beads
-                if let Some(comments) = &bead.comments {
-                    for comment in comments {
-                        if comment.id > max_comment_id {
-                            max_comment_id = comment.id;
-                        }
-                    }
-                }
-
                 if bead.id == payload.bead_id {
                     found_bead_index = Some(beads.len());
                 }
@@ -393,7 +399,7 @@ pub async fn add_comment(Json(payload): Json<AddCommentRequest>) -> impl IntoRes
 
     // Create the new comment
     let new_comment = Comment {
-        id: max_comment_id + 1,
+        id: Uuid::new_v4().to_string(),
         issue_id: payload.bead_id.clone(),
         author: payload.author,
         text: payload.text,
@@ -685,11 +691,23 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_bead_with_comments() {
+    fn test_parse_bead_with_integer_comment_id() {
+        // Legacy format: comment id is an integer
         let json = r#"{"id":"test-456","title":"With Comments","status":"closed","comments":[{"id":1,"issue_id":"test-456","author":"user","text":"A comment","created_at":"2026-01-01T00:00:00Z"}]}"#;
         let bead: Bead = serde_json::from_str(json).unwrap();
         assert_eq!(bead.comments.as_ref().unwrap().len(), 1);
+        assert_eq!(bead.comments.as_ref().unwrap()[0].id, "1");
         assert_eq!(bead.comments.as_ref().unwrap()[0].text, "A comment");
+    }
+
+    #[test]
+    fn test_parse_bead_with_uuid_comment_id() {
+        // bd ≥ 1.0.5 format: comment id is a UUID string
+        let json = r#"{"id":"test-457","title":"With UUID Comment","status":"open","comments":[{"id":"019eedff-99df-7363-9cd5-b12d9493d469","issue_id":"test-457","author":"user","text":"UUID comment","created_at":"2026-06-22T06:23:32Z"}]}"#;
+        let bead: Bead = serde_json::from_str(json).unwrap();
+        assert_eq!(bead.comments.as_ref().unwrap().len(), 1);
+        assert_eq!(bead.comments.as_ref().unwrap()[0].id, "019eedff-99df-7363-9cd5-b12d9493d469");
+        assert_eq!(bead.comments.as_ref().unwrap()[0].text, "UUID comment");
     }
 
     #[test]
