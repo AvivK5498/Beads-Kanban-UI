@@ -21,7 +21,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import "highlight.js/styles/github-dark.css";
 
-const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3008';
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || '';
 
 export interface DesignDocViewerProps {
   /** Path to design doc (e.g., ".designs/{EPIC_ID}.md") */

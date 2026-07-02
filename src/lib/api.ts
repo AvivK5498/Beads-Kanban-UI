@@ -5,7 +5,11 @@
 
 import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, PRStatus, PRFilesResponse, MemoryResponse, MemoryStats, MemoryEntry, Agent, AgentModel } from '@/types';
 
-const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3008';
+// Default to same-origin (relative URLs) so the embedded frontend works from
+// any host the backend is reached on (localhost, a LAN IP, a Tailscale name),
+// not just localhost. Set NEXT_PUBLIC_BACKEND_URL to target a separate backend
+// (e.g. `npm run dev` frontend on :3007 → backend on :3008).
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || '';
 
 /**
  * Input for creating a new project

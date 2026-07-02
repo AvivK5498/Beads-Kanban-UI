@@ -3,7 +3,7 @@
  * Shared functions for fetching and processing design documents
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3008';
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || '';
 
 /**
  * Fetch design doc content from the backend API
