@@ -265,6 +265,24 @@ pub async fn read_beads(Query(params): Query<BeadsParams>) -> impl IntoResponse 
         }
     }
 
+    // Fifth pass: Extract blocking dependencies into the deps field.
+    // The frontend treats a bead as blocked when `deps` is non-empty
+    // (see isBlocked in bead-card.tsx), so `blocks`-type dependencies must
+    // be surfaced here. Without this, blocking relationships from the JSONL
+    // are silently dropped and no bead ever shows as blocked.
+    for bead in &mut beads {
+        if let Some(deps) = &bead.dependencies {
+            let blocking: Vec<String> = deps
+                .iter()
+                .filter(|dep| dep.dep_type == "blocks")
+                .map(|dep| dep.depends_on_id.clone())
+                .collect();
+            if !blocking.is_empty() {
+                bead.deps = Some(blocking);
+            }
+        }
+    }
+
     (StatusCode::OK, Json(serde_json::json!({ "beads": beads })))
 }
 
@@ -872,6 +890,105 @@ mod tests {
         assert_eq!(relates_to.len(), 2);
         assert_eq!(relates_to[0], "bead-b");
         assert_eq!(relates_to[1], "bead-c");
+    }
+
+    #[test]
+    fn test_blocks_extraction_into_deps() {
+        // Test the fifth pass: blocks-type dependencies populate `deps`,
+        // while parent-child and relates-to are excluded.
+        let mut bead = Bead {
+            id: "bead-a".to_string(),
+            title: "Bead A".to_string(),
+            description: None,
+            status: "open".to_string(),
+            priority: None,
+            issue_type: None,
+            owner: None,
+            created_at: None,
+            created_by: None,
+            updated_at: None,
+            closed_at: None,
+            close_reason: None,
+            comments: None,
+            parent_id: None,
+            children: None,
+            design_doc: None,
+            deps: None,
+            relates_to: None,
+            dependencies: Some(vec![
+                Dependency {
+                    depends_on_id: "bead-blocker".to_string(),
+                    dep_type: "blocks".to_string(),
+                },
+                Dependency {
+                    depends_on_id: "bead-parent".to_string(),
+                    dep_type: "parent-child".to_string(),
+                },
+                Dependency {
+                    depends_on_id: "bead-related".to_string(),
+                    dep_type: "relates-to".to_string(),
+                },
+            ]),
+        };
+
+        // Simulate the fifth pass extraction logic
+        if let Some(deps) = &bead.dependencies {
+            let blocking: Vec<String> = deps
+                .iter()
+                .filter(|dep| dep.dep_type == "blocks")
+                .map(|dep| dep.depends_on_id.clone())
+                .collect();
+            if !blocking.is_empty() {
+                bead.deps = Some(blocking);
+            }
+        }
+
+        // Only the blocks dep should be surfaced in deps
+        let deps = bead.deps.unwrap();
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0], "bead-blocker");
+    }
+
+    #[test]
+    fn test_deps_none_when_no_blocks_deps() {
+        // deps stays None when there are no blocks-type dependencies
+        let mut bead = Bead {
+            id: "bead-x".to_string(),
+            title: "Bead X".to_string(),
+            description: None,
+            status: "open".to_string(),
+            priority: None,
+            issue_type: None,
+            owner: None,
+            created_at: None,
+            created_by: None,
+            updated_at: None,
+            closed_at: None,
+            close_reason: None,
+            comments: None,
+            parent_id: None,
+            children: None,
+            design_doc: None,
+            deps: None,
+            relates_to: None,
+            dependencies: Some(vec![Dependency {
+                depends_on_id: "bead-parent".to_string(),
+                dep_type: "parent-child".to_string(),
+            }]),
+        };
+
+        if let Some(deps) = &bead.dependencies {
+            let blocking: Vec<String> = deps
+                .iter()
+                .filter(|dep| dep.dep_type == "blocks")
+                .map(|dep| dep.depends_on_id.clone())
+                .collect();
+            if !blocking.is_empty() {
+                bead.deps = Some(blocking);
+            }
+        }
+
+        assert!(bead.deps.is_none());
     }
 
     #[test]
